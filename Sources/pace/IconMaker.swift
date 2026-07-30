@@ -12,9 +12,9 @@ enum IconMaker {
     /// resting low, the way a loose googly pupil settles under gravity. (During a
     /// break the app shows animated googly eyes; this is the calm static one.)
     /// Paused adds a bold slash and drops the pupil.
-    static func statusImage(paused: Bool) -> NSImage {
+    static func statusImage(paused: Bool, nudge: Bool = false) -> NSImage {
         let img = NSImage(size: NSSize(width: glyphW, height: glyphH), flipped: false) { _ in
-            drawEye(paused: paused, color: .black)
+            drawEye(paused: paused, nudge: nudge, color: .black)
             return true
         }
         img.isTemplate = true
@@ -22,7 +22,8 @@ enum IconMaker {
     }
 
     /// Draw the googly eye into the current context (glyphW x glyphH space).
-    static func drawEye(paused: Bool, color: NSColor) {
+    /// `nudge` glances the pupil up and away, the on-call "look away" cue.
+    static func drawEye(paused: Bool, nudge: Bool = false, color: NSColor) {
         color.set()
         let rim = NSBezierPath(ovalIn: NSRect(x: 1.7, y: 1.7, width: glyphW - 3.4, height: glyphH - 3.4))
         rim.lineWidth = 1.5
@@ -33,14 +34,16 @@ enum IconMaker {
             s.move(to: NSPoint(x: 4.0, y: 4.6)); s.line(to: NSPoint(x: glyphW - 4.0, y: glyphH - 4.6))
             s.lineWidth = 1.7; s.lineCapStyle = .round; s.stroke()
         } else {
-            let r: CGFloat = 3.1                       // bold pupil, resting low
-            NSBezierPath(ovalIn: NSRect(x: glyphW / 2 - r, y: 7.1 - r, width: 2 * r, height: 2 * r)).fill()
+            let r: CGFloat = 3.1
+            let cx = nudge ? glyphW / 2 - 2.3 : glyphW / 2     // glance up-and-away when nudging
+            let cy: CGFloat = nudge ? 11.4 : 7.1               // else pupil rests low
+            NSBezierPath(ovalIn: NSRect(x: cx - r, y: cy - r, width: 2 * r, height: 2 * r)).fill()
         }
     }
 
     /// Render the glyph big for review, black-on-light or white-on-dark (as the
     /// bar would tint it). `pace --make-menuicon <path> [paused] [dark]`.
-    static func writeMenuIconPreview(to path: String, paused: Bool, dark: Bool, height: Int = 360) -> Bool {
+    static func writeMenuIconPreview(to path: String, paused: Bool, dark: Bool, nudge: Bool = false, height: Int = 360) -> Bool {
         let w = Int(CGFloat(height) * glyphW / glyphH)
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: height,
@@ -54,7 +57,7 @@ enum IconMaker {
 
         let inset = CGFloat(height) * 0.14
         let glyphImg = NSImage(size: NSSize(width: glyphW, height: glyphH), flipped: false) { _ in
-            drawEye(paused: paused, color: dark ? .white : .black)
+            drawEye(paused: paused, nudge: nudge, color: dark ? .white : .black)
             return true
         }
         glyphImg.draw(in: NSRect(x: inset, y: inset, width: CGFloat(w) - 2 * inset, height: CGFloat(height) - 2 * inset))

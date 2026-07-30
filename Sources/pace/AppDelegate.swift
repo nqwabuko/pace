@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private let scheduler = Scheduler()
     private let overlay = OverlayController()
@@ -10,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menu: NSMenu!
     private var statsWindow: NSWindow?
     private var feedbackWindow: NSWindow?
+    private var nudgeUntil: Date?
+    private let notificationsAvailable = Bundle.main.bundleURL.pathExtension == "app"
 
     // Menu items we update live / on open.
     private let headerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -17,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let eyeItem = NSMenuItem(title: "Eye breaks", action: #selector(toggleEye), keyEquivalent: "")
     private let moveItem = NSMenuItem(title: "Move breaks", action: #selector(toggleMove), keyEquivalent: "")
     private let meetingItem = NSMenuItem(title: "Pause during calls", action: #selector(toggleMeeting), keyEquivalent: "")
+    private let callBreaksItem = NSMenuItem(title: "On-call nudges (keep breaks during calls)", action: #selector(toggleCallBreaks), keyEquivalent: "")
     private let idleItem = NSMenuItem(title: "Reset after a long locked break", action: #selector(toggleIdle), keyEquivalent: "")
     private let soundItem = NSMenuItem(title: "Sound when a break starts", action: #selector(toggleSound), keyEquivalent: "")
     private let endChimeItem = NSMenuItem(title: "Chime when a break ends", action: #selector(toggleEndChime), keyEquivalent: "")
@@ -65,7 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.overlay.show(kind)
         }
         scheduler.onMeetingDuringBreak = { [weak self] in self?.overlay.dismissForMeeting() }
+        scheduler.onCallNudge = { [weak self] kind in self?.deliverCallNudge(kind) }
         scheduler.onTick = { [weak self] status in self?.render(status) }
+
+        if notificationsAvailable {
+            UNUserNotificationCenter.current().delegate = self
+            if Settings.callBreaks { ensureNotifPermission() }
+        }
 
         // Screen lock / unlock drive the away/reset logic (safer than idle time).
         let dnc = DistributedNotificationCenter.default()
@@ -104,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(moveEvery); m.addItem(moveLen)
         m.addItem(.separator())
 
-        for it in [meetingItem, idleItem, soundItem, endChimeItem] { it.target = self; m.addItem(it) }
+        for it in [meetingItem, callBreaksItem, idleItem, soundItem, endChimeItem] { it.target = self; m.addItem(it) }
         awayReset = intervalSubmenu("Reset if locked for", [10, 15, 20, 30, 45], "min", #selector(setAwayReset))
         m.addItem(awayReset)
         m.addItem(.separator())
@@ -176,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         eyeItem.state = Settings.eyeEnabled ? .on : .off
         moveItem.state = Settings.moveEnabled ? .on : .off
         meetingItem.state = Settings.meetingAware ? .on : .off
+        callBreaksItem.state = Settings.callBreaks ? .on : .off
         idleItem.state = Settings.idleAware ? .on : .off
         soundItem.state = Settings.bool(.soundEnabled) ? .on : .off
         endChimeItem.state = Settings.endChime ? .on : .off
@@ -222,13 +233,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: live status
 
     private func render(_ s: Scheduler.Status) {
-        statusItem.button?.image = IconMaker.statusImage(paused: s.paused)
+        let nudging = (nudgeUntil.map { $0 > Date() } ?? false) && !s.paused
+        statusItem.button?.image = IconMaker.statusImage(paused: s.paused, nudge: nudging)
 
         let summary: String
         if s.paused {
             summary = s.pausedUntil.map { "Paused until \(hm($0))" } ?? "Paused"
         } else if s.meeting {
-            summary = "In a call, holding"
+            summary = Settings.callBreaks ? "In a call, nudging gently" : "In a call, holding"
         } else if s.away {
             summary = "Away, break waiting for you"
         } else if let at = s.scheduledAt, isSooner(at, than: s) {
@@ -269,6 +281,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleIdle() { Settings.toggle(.idleAware) }
     @objc private func toggleSound() { Settings.toggle(.soundEnabled) }
     @objc private func toggleEndChime() { Settings.toggle(.endChime) }
+    @objc private func toggleCallBreaks() {
+        Settings.toggle(.callBreaks)
+        if Settings.callBreaks { ensureNotifPermission() }
+    }
+
+    // MARK: on-call nudges
+
+    /// A due break arrived while on a call (on-call nudges on): flip the menu-bar
+    /// eye to "look away" for ~30s and post a quiet, call-friendly notification.
+    /// No sound (your mic would catch it); the icon is the private cue.
+    private func deliverCallNudge(_ kind: BreakKind) {
+        nudgeUntil = Date().addingTimeInterval(30)
+        Report.log(kind: kind.label, outcome: "nudged", seconds: 0)
+        if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
+
+        guard notificationsAvailable else { return }
+        let content = UNMutableNotificationContent()
+        content.title = kind == .eye ? "Rest your eyes" : "Shift your body"
+        content.body = Tips.callCue(for: kind)
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "pace-nudge-\(kind.label)", content: content, trigger: nil))
+    }
+
+    private func ensureNotifPermission() {
+        guard notificationsAvailable else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    }
+
+    // Show the nudge banner even though pace is a background (menu-bar) app.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner])
+    }
     @objc private func toggleLogin() { LoginItem.toggle() }
     @objc private func setEyeEvery(_ s: NSMenuItem) { Settings.set(.eyeIntervalMin, s.tag) }
     @objc private func setEyeLen(_ s: NSMenuItem) { Settings.set(.eyeDurationSec, s.tag) }

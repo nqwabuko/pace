@@ -48,6 +48,7 @@ final class Scheduler {
     var onTick: ((Status) -> Void)?
     var onBreakDue: ((BreakKind) -> Void)?
     var onMeetingDuringBreak: (() -> Void)?   // a call started while a break is up
+    var onCallNudge: ((BreakKind) -> Void)?   // a due break during a call (on-call nudges on)
 
     struct Status {
         var paused: Bool
@@ -150,12 +151,14 @@ final class Scheduler {
             pausedUntil = nil
         }
 
-        // In a call: hold everything and wait. A break that comes due mid-call
-        // fires the moment the call ends.
-        if Settings.meetingAware && Signals.inCall() {
+        // On a call. By default we hold breaks until it ends. With on-call nudges
+        // enabled we instead keep counting and deliver a gentle nudge at the fire
+        // points below (via `onCall`), so call-heavy days still get micro-breaks.
+        let onCall = Settings.meetingAware && Signals.inCall()
+        if onCall {
             stMeeting = true
-            if overlayShowing { onMeetingDuringBreak?() }   // bow out of a break for a call
-            return
+            if overlayShowing { onMeetingDuringBreak?() }   // never cover a call
+            if !Settings.callBreaks { return }
         }
 
         // Screen locked = genuinely away. Keep counting so the break you're owed
@@ -175,8 +178,7 @@ final class Scheduler {
         // A typed one-off break fires first, once its time arrives.
         if let p = pending, Date() >= p.date {
             pending = nil
-            reset(for: p.kind)
-            onBreakDue?(p.kind)
+            fire(p.kind, onCall: onCall)
             return
         }
 
@@ -184,12 +186,17 @@ final class Scheduler {
         moveElapsed += 1
 
         if Settings.moveEnabled && moveElapsed >= Settings.moveIntervalSec {
-            reset(for: .move)
-            onBreakDue?(.move)
+            fire(.move, onCall: onCall)
         } else if Settings.eyeEnabled && eyeElapsed >= Settings.eyeIntervalSec {
-            reset(for: .eye)
-            onBreakDue?(.eye)
+            fire(.eye, onCall: onCall)
         }
+    }
+
+    /// Deliver a due break: a gentle nudge while on a call (on-call nudges on),
+    /// otherwise the full overlay. Resets the counter either way.
+    private func fire(_ kind: BreakKind, onCall: Bool) {
+        reset(for: kind)
+        if onCall { onCallNudge?(kind) } else { onBreakDue?(kind) }
     }
 
     private func emit() {

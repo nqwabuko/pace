@@ -11,7 +11,7 @@ enum Settings {
     enum Key: String {
         case eyeEnabled, eyeIntervalMin, eyeDurationSec
         case moveEnabled, moveIntervalMin, moveDurationSec
-        case meetingAware, idleAware, awayResetMin
+        case meetingAware, idleAware, awayResetMin, callBreaks
         case soundEnabled, endChime
         case vaultPath
     }
@@ -24,7 +24,8 @@ enum Settings {
             Key.moveEnabled.rawValue:     true,
             Key.moveIntervalMin.rawValue: 30,   // 30 min: the metabolic sweet spot
             Key.moveDurationSec.rawValue: 120,  // 2 min: solid microbreak
-            Key.meetingAware.rawValue:    true, // never interrupt a call
+            Key.meetingAware.rawValue:    true, // hold/adjust breaks during calls
+            Key.callBreaks.rawValue:      false, // on-call: gentle nudges instead of holding (opt-in)
             Key.idleAware.rawValue:       true, // a break away from the keys counts
             Key.awayResetMin.rawValue:    15,   // away this long counts as a real rest (then reset on return)
             Key.soundEnabled.rawValue:    false, // soft sound when a break starts
@@ -55,6 +56,7 @@ enum Settings {
     static var eyeEnabled: Bool { bool(.eyeEnabled) }
     static var moveEnabled: Bool { bool(.moveEnabled) }
     static var meetingAware: Bool { bool(.meetingAware) }
+    static var callBreaks: Bool { bool(.callBreaks) }
     static var idleAware: Bool { bool(.idleAware) }
     static var eyeIntervalSec: Int { max(60, int(.eyeIntervalMin) * 60) }
     static var moveIntervalSec: Int { max(60, int(.moveIntervalMin) * 60) }

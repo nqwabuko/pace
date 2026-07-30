@@ -83,4 +83,23 @@ enum Tips {
         let pool = kind == .eye ? eye : move
         return pool.randomElement() ?? move[0]
     }
+
+    // Short, call-friendly cues for the on-call nudge (one line, doable on camera).
+    static let callEye = [
+        "Glance away from the screen for 20 seconds; look at something far.",
+        "If you can, drop off camera for 20-30s and rest your eyes, then come back.",
+        "Soften your focus and blink slowly a few times while you listen.",
+        "Look out a window or across the room for a moment.",
+    ]
+    static let callMove = [
+        "Sit up out of the slouch; lengthen your spine.",
+        "Move your legs and circle your ankles under the desk.",
+        "Roll your shoulders back and open your chest.",
+        "Shift your weight and change how you're sitting.",
+        "Unclench your jaw and drop your shoulders.",
+    ]
+
+    static func callCue(for kind: BreakKind) -> String {
+        (kind == .eye ? callEye : callMove).randomElement() ?? ""
+    }
 }

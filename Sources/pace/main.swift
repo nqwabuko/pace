@@ -22,7 +22,7 @@ if let i = args.firstIndex(of: "--parse") {
 // `--make-menuicon <path> [paused] [dark]`: render the menu-bar glyph big for review.
 if let i = args.firstIndex(of: "--make-menuicon") {
     let out = i + 1 < args.count ? args[i + 1] : "menuicon.png"
-    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark")) ? 0 : 1)
+    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge")) ? 0 : 1)
 }
 
 // `--feedback <bug|idea> <note…>`: log a bug/idea from the terminal.

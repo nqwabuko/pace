@@ -92,7 +92,7 @@ enum Signals {
             mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
         for id in ids {
             var running: UInt32 = 0
-            var s = UInt32(MemoryLayout<UInt32>.size)
+            let s = UInt32(MemoryLayout<UInt32>.size)
             var u: UInt32 = 0
             if CMIOObjectGetPropertyData(id, &runAddr, 0, nil, s, &u, &running) == noErr, running != 0 {
                 return true
