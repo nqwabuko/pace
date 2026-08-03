@@ -9,6 +9,7 @@ final class BreakVM: ObservableObject {
     @Published var remaining: Int
     var onSkip: () -> Void = {}
     var onSnooze: () -> Void = {}
+    var onDone: () -> Void = {}
     init(kind: BreakKind, remaining: Int) {
         self.kind = kind
         self.remaining = remaining
@@ -66,7 +67,8 @@ private struct BreakView: View {
                 Button("Skip") { vm.onSkip() }
                     .keyboardShortcut(.cancelAction)      // Esc
                 Button("+5 min") { vm.onSnooze() }
-                    .keyboardShortcut(.defaultAction)     // Return
+                Button(vm.kind.doneLabel) { vm.onDone() }
+                    .keyboardShortcut(.defaultAction)     // Return — already did it, credit the break
             }
             .controlSize(.large)
             .padding(.top, 6)
@@ -109,6 +111,7 @@ final class OverlayController {
         let vm = BreakVM(kind: kind, remaining: kind.durationSec)
         vm.onSkip = { [weak self] in self?.dismiss(.skipped) }
         vm.onSnooze = { [weak self] in self?.dismiss(.snoozed) }
+        vm.onDone = { [weak self] in self?.dismiss(.completed) }   // already did it: credit + chime
         self.vm = vm
 
         let screen = NSScreen.main ?? NSScreen.screens.first!

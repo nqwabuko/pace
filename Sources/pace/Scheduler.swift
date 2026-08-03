@@ -5,6 +5,7 @@ enum BreakKind {
     var title: String { self == .eye ? "Rest your eyes" : "Move your body" }
     var durationSec: Int { self == .eye ? Settings.eyeDurationSec : Settings.moveDurationSec }
     var label: String { self == .eye ? "eye" : "move" }
+    var doneLabel: String { self == .eye ? "Already rested" : "Already moved" }
 }
 
 enum BreakEndReason {
