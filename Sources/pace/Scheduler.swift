@@ -136,6 +136,13 @@ final class Scheduler {
     private var screenLocked = false
     private var lockedSince: Date?
 
+    /// What each track owed at the moment the screen locked. Recorded then rather
+    /// than read at unlock because the counters deliberately keep climbing while
+    /// you're away (so the break you're owed is waiting when you get back), and an
+    /// hour at lunch is not an hour of eye strain. The debt a lunch break cleared
+    /// is the one you walked away with.
+    private var lockedDebt: [Gauge] = []
+
     // Per-tick snapshot, used only to build the UI status.
     private var stMeeting = false
     private var stAway = false
@@ -144,6 +151,12 @@ final class Scheduler {
     var onBreakDue: ((BreakKind, Int) -> Void)?   // kind, times it's already been put off
     var onMeetingDuringBreak: (() -> Void)?   // a call started while a break is up
     var onCallNudge: ((BreakKind) -> Void)?   // a due break during a call (on-call nudges on)
+
+    /// A rest credited by a long enough spell away from the keys, with what each
+    /// enabled track owed at the moment it cleared, and how long you were away.
+    /// The loop has always credited this; nothing recorded it, so the log claimed
+    /// you'd gone a whole lunch without resting.
+    var onAwayRest: (([Gauge], Int) -> Void)?
 
     /// One break type's public reading. A value rather than a handful of loose
     /// `eye*`/`move*` fields: `Track` exists so the two halves can't drift, and
@@ -189,6 +202,10 @@ final class Scheduler {
 
         /// Seconds until the next recurring break, if any is enabled.
         var nextIn: Int? { enabled.map(\.remaining).min() }
+
+        /// One kind's reading. The `Track` pair is private, so this is how a caller
+        /// asks "what did the eye break owe just now" without keeping its own copy.
+        func gauge(_ kind: BreakKind) -> Gauge { kind == .eye ? eye : move }
     }
 
     func start() {
@@ -221,6 +238,7 @@ final class Scheduler {
         if locked {
             screenLocked = true
             lockedSince = env.wall()
+            lockedDebt = currentGauges()
         } else {
             unlock()
         }
@@ -231,9 +249,12 @@ final class Scheduler {
     /// in `tick` can reuse it without recursing.
     private func unlock() {
         if let since = lockedSince, env.wall().timeIntervalSince(since) >= Double(Settings.awayResetSec) {
+            let cleared = lockedDebt
             eye.rested()            // a real, long-enough break happened
             move.rested()
+            onAwayRest?(cleared, Int(env.wall().timeIntervalSince(since)))
         }
+        lockedDebt = []
         screenLocked = false
         lockedSince = nil
     }
@@ -396,6 +417,13 @@ final class Scheduler {
             scheduledAt: pending?.date,
             eye: gauge(.eye, eye, enabled: Settings.eyeEnabled, interval: Double(Settings.eyeIntervalSec)),
             move: gauge(.move, move, enabled: Settings.moveEnabled, interval: Double(Settings.moveIntervalSec))))
+    }
+
+    /// Both tracks' readings right now, enabled ones only.
+    private func currentGauges() -> [Gauge] {
+        [gauge(.eye, eye, enabled: Settings.eyeEnabled, interval: Double(Settings.eyeIntervalSec)),
+         gauge(.move, move, enabled: Settings.moveEnabled, interval: Double(Settings.moveIntervalSec))]
+            .filter(\.enabled)
     }
 
     private func gauge(_ kind: BreakKind, _ t: Track, enabled: Bool, interval: Double) -> Gauge {

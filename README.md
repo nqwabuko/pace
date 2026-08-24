@@ -121,9 +121,39 @@ any phrase resolves with `swift run pace --parse "break @10am"`.
 
 Left-click → **Stats** (or right-click → Reporting → Show stats) opens a small
 native window: today / 7-day-average / streak tiles, a stacked per-day bar chart
-(eye vs move), and an eye-vs-move donut. Built with Swift Charts, so it matches
-the system look. This is the quick daily glance; the Obsidian export below is for
-long-range tracking.
+(eye vs move), the **Putting breaks off** panel below, and an eye-vs-move donut.
+Built with Swift Charts, so it matches the system look. This is the quick daily
+glance; the Obsidian export below is for long-range tracking.
+
+Render it to a PNG without opening a window over your work:
+`swift run pace --stats-preview /tmp/stats.png`.
+
+## Putting breaks off
+
+The menu-bar eye already shows a debt as it grows, but it forgets. This panel is
+the same fact on a timescale where a habit is actually visible: **minutes past
+due** per day as bars, with the number of times you hit **+5 min** or **Skip**
+annotated above each one, plus this week against the one before.
+
+Two numbers together on purpose. Three taps is nothing, and a stretch past due is
+nothing; the pair isn't. Alone, either one reads as harmless.
+
+How the minutes are counted, because the definition is the whole value of the
+number:
+
+- Only the event that **ends** a debt carries it. A break put off four times and
+  then taken contributes its twenty overdue minutes **once**, not five times.
+- **Eye only.** Eye and move overdue overlap in real time, so adding the two would
+  bill the same strained minute twice and the total would stop being a quantity of
+  time. Known gap: a movement break rests your eyes too but logs as `move`, so the
+  eye debt it cleared goes unattributed. It under-reports rather than double-counts.
+- A **long spell away** (lunch, a meeting away from the desk) counts as a real rest
+  and clears the debt, and what gets recorded is what you owed **when you walked
+  away** — not the hour you were gone, which is the opposite of eye strain.
+- **First time %** is over the breaks you took, and it only counts rows written
+  since pace started recording this. Older takes are left out rather than read as
+  "took it first time", which would flatter the back history and make the number
+  drop the day the honest data started.
 
 ## Reporting (Obsidian)
 
@@ -131,11 +161,13 @@ Right-click → **Reporting** → **Log to Obsidian vault…** and pick your vau
 any folder). pace writes into a `pace/` subfolder:
 
 - **Daily notes** (`2026-07-21.md`) with Dataview-friendly YAML frontmatter
-  (`pace_eye`, `pace_move`, `pace_skipped`, `pace_break_minutes`) plus a table of
-  the day's breaks. The frontmatter folds straight into an existing self-mastery
+  (`pace_eye`, `pace_move`, `pace_skipped`, `pace_put_off`, `pace_away_rests`,
+  `pace_eye_overdue_min`, `pace_break_minutes`) plus a table of the day's breaks,
+  each row with how far past due it had run and how many times it had been put off. The frontmatter folds straight into an existing self-mastery
   vault, so your own Dataview / Charts queries can pick it up.
-- **`pace-dashboard.md`**: 7- and 30-day averages (breaks/day, resting minutes,
-  % taken), a current streak, a 14-day bar chart, and an eye-vs-move split. Built
+- **`pace-dashboard.md`**: 7- and 30-day averages (breaks taken/day, resting
+  minutes, put-offs/day, minutes past due, % taken first time), a current streak,
+  a 14-day bar chart, and an eye-vs-move split. Built
   with a monospace bar chart and a native mermaid pie, so it renders with **no
   plugins**.
 
@@ -173,6 +205,7 @@ swift run pace --demo             # preview one break overlay (5s) and quit
 swift run pace --check            # print mic-in-use / idle / login-item and exit
 swift run pace --check ~/vault    # ...and try a real write into that folder
 swift run pace --sim              # run the whole loop against a fake clock
+swift run pace --stats-preview /tmp/s.png   # render the stats window off sample data
 ```
 
 `--check` is the way to verify detection: run it, start a call, run it again, and
@@ -198,6 +231,14 @@ loop — extending a break must never credit a rest
   ok   counter keeps climbing through 4 extensions   1.00 → 2.00 → 3.00 → 4.00
   ok   four extensions are all counted   refusals=4
   ok   taking it finally rests you   0.00
+
+debt — extensions and the time they cost must both survive the log
+  ok   a line written before overdue/refusals existed still decodes
+  ok   past due counts the event that cleared the debt, once   1500s
+  ok   both extensions and the skip count as put off   3×
+  ok   first-time split ignores rows with no refusals recorded
+  ok   a legacy day still shows its breaks, with no debt claimed
+  ok   a long spell away records the debt you walked away with, not the time away
 
 vault health — a broken vault must read as broken, then heal
   ok   three failures count as three   3
@@ -250,6 +291,8 @@ configuration.
 - `Sources/pace/BreakOverlay.swift` — the dismissible overlay window.
 - `Sources/pace/AppDelegate.swift` — status item + menu.
 - `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon.
+- `Sources/pace/Report.swift` — the JSONL log, the debt arithmetic, the Obsidian render.
+- `Sources/pace/StatsView.swift` — the stats window, including the put-off panel.
 - `Sources/pace/Sim.swift` — the fake-clock harness behind `--sim`.
 - `Sources/pace/SelfTest.swift` — the asserted invariants behind `--selftest`.
 - `make-app.sh` — build the self-contained bundle.

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var feedbackWindow: NSWindow?
     private var nudgeUntil: Date?
     private var iconKey: String?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
+    private var lastStatus: Scheduler.Status?   // latest tick, so a closing break can log what it owed
     private let notificationsAvailable = Bundle.main.bundleURL.pathExtension == "app"
 
     // Menu items we update live / on open.
@@ -59,11 +60,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         overlay.onEnd = { [weak self] kind, reason in
             guard let self else { return }
             self.scheduler.overlayShowing = false
+            // Read the debt before resolving, not after: `breakFinished` either
+            // clears it or adds to it, and what belongs on the record is how far
+            // past due you were at the moment you decided what to do about it.
+            let owed = self.lastStatus?.gauge(kind)
             self.scheduler.breakFinished(kind, reason)
             Report.log(kind: kind.label, outcome: reason.logName,
-                       seconds: reason == .completed ? kind.durationSec : 0)
+                       seconds: reason == .completed ? kind.durationSec : 0,
+                       overdueSec: owed?.overdue, refusals: owed?.refusals)
             let vault = Settings.vaultPath
             if !vault.isEmpty { Report.updateVault(vault) }
+        }
+        scheduler.onAwayRest = { credits, awaySec in
+            for g in credits {
+                Report.log(kind: g.kind.label, outcome: "rested", seconds: awaySec,
+                           overdueSec: g.overdue, refusals: g.refusals)
+            }
+            if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
         }
         scheduler.onBreakDue = { [weak self] kind, refusals in
             guard let self else { return }
@@ -253,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // MARK: live status
 
     private func render(_ s: Scheduler.Status) {
+        lastStatus = s
         let nudging = (nudgeUntil.map { $0 > Date() } ?? false) && !s.paused
         // The pupil widens over the eye interval, and past due the lid keeps
         // closing and the eye sags — so putting a break off again and again is
@@ -341,7 +355,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// No sound (your mic would catch it); the icon is the private cue.
     private func deliverCallNudge(_ kind: BreakKind) {
         nudgeUntil = Date().addingTimeInterval(30)
-        Report.log(kind: kind.label, outcome: "nudged", seconds: 0)
+        let owed = lastStatus?.gauge(kind)
+        Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
+                   overdueSec: owed?.overdue, refusals: owed?.refusals)
         if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
 
         guard notificationsAvailable else { return }
@@ -424,7 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         if let w = statsWindow {
             w.contentViewController = host
         } else {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 600),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 720),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "pace stats"
             w.isReleasedWhenClosed = false

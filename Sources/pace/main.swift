@@ -54,6 +54,15 @@ if let i = args.firstIndex(of: "--report-demo"), i + 1 < args.count {
     exit(0)
 }
 
+// `--stats-preview <path>`: render the stats window to a PNG off sample data, so
+// the reporting can be reviewed without opening a window over your work.
+if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
+    Settings.registerDefaults()
+    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: Report.sampleEvents()))
+    print(ok ? "wrote \(args[i + 1])" : "failed to render")
+    exit(ok ? 0 : 1)
+}
+
 // `--sim ["<script>"]`: drive the scheduler off a fake clock and print the trace.
 // The loop's test harness — see Sim.swift for the script language.
 if let i = args.firstIndex(of: "--sim") {
