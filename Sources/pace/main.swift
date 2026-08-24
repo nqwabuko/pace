@@ -19,10 +19,23 @@ if let i = args.firstIndex(of: "--parse") {
     exit(0)
 }
 
-// `--make-menuicon <path> [paused] [dark]`: render the menu-bar glyph big for review.
+// `--make-menuicon <path> [paused] [dark] [nudge] [strain <0…1>]`: render the
+// menu-bar glyph big for review.
 if let i = args.firstIndex(of: "--make-menuicon") {
     let out = i + 1 < args.count ? args[i + 1] : "menuicon.png"
-    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge")) ? 0 : 1)
+    let strain = args.firstIndex(of: "strain").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 0
+    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge"), strain: CGFloat(strain)) ? 0 : 1)
+}
+
+// `--make-strainstrip <path> [dark]`: render the pupil-dilation sequence as one
+// strip, big plus actual size, to judge how it reads in the bar.
+if let i = args.firstIndex(of: "--make-strainstrip") {
+    let out = i + 1 < args.count ? args[i + 1] : "strainstrip.png"
+    let stages = args.firstIndex(of: "stages").map { i in
+        args[(i + 1)...].compactMap { Double($0) }.map { CGFloat($0) }
+    }.flatMap { $0.isEmpty ? nil : $0 }
+    exit((stages.map { IconMaker.writeStrainStrip(to: out, dark: args.contains("dark"), stages: $0) }
+          ?? IconMaker.writeStrainStrip(to: out, dark: args.contains("dark"))) ? 0 : 1)
 }
 
 // `--feedback <bug|idea> <note…>`: log a bug/idea from the terminal.
@@ -41,21 +54,43 @@ if let i = args.firstIndex(of: "--report-demo"), i + 1 < args.count {
     exit(0)
 }
 
-// `--check`: print the environmental signals and exit. Lets you verify meeting
-// and idle detection without the GUI (start a call, run it, see mic-in-use flip).
-if args.contains("--check") {
+// `--sim ["<script>"]`: drive the scheduler off a fake clock and print the trace.
+// The loop's test harness — see Sim.swift for the script language.
+if let i = args.firstIndex(of: "--sim") {
+    let script = args[(i + 1)...].joined(separator: " ")
+    exit(Sim.run(script.isEmpty ? Sim.defaultScript : script))
+}
+
+// `--selftest`: assert the mechanical invariants (glyph weight, the extend-a-break
+// loop, vault-health folding) and exit non-zero on failure.
+if args.contains("--selftest") {
+    SelfTest.dumpCurve = args.contains("verbose")
+    exit(SelfTest.run())
+}
+
+// `--check [<vault-path>]`: print the environmental signals and exit. Lets you
+// verify meeting and idle detection without the GUI (start a call, run it, see
+// mic-in-use flip), and check whether a folder actually works as a vault.
+if let ci = args.firstIndex(of: "--check") {
     Settings.registerDefaults()
     print("in a call  : \(Signals.inCall())   (mic: \(Signals.micInUse()))")
     print("idle (s)   : \(String(format: "%.1f", Signals.idleSeconds()))")
     print("login item : \(LoginItem.isEnabled)")
+    let vault = ci + 1 < args.count ? args[ci + 1] : Settings.vaultPath
+    print("vault      : \(vault.isEmpty ? "not logging" : vault)")
+    if !vault.isEmpty { print("vault write: \(Report.probeVault(vault) ?? "OK")") }
     exit(0)
 }
 
 // `--demo`: preview one break overlay (5s) and quit. Handy to see it, and the
 // overlay smoke-test.
 if args.contains("--demo") {
+    // A scratch settings domain, so previewing the overlay can't leave your real
+    // break length set to five seconds.
+    UserDefaults.standard.removePersistentDomain(forName: "global.ampeco.pace.demo")
+    Settings.store = UserDefaults(suiteName: "global.ampeco.pace.demo") ?? .standard
     Settings.registerDefaults()
-    UserDefaults.standard.set(5, forKey: Settings.Key.eyeDurationSec.rawValue)
+    Settings.set(.eyeDurationSec, 5)
     let app = NSApplication.shared
     let demo = DemoDelegate()
     app.delegate = demo

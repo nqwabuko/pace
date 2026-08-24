@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var statsWindow: NSWindow?
     private var feedbackWindow: NSWindow?
     private var nudgeUntil: Date?
+    private var iconKey: String?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
     private let notificationsAvailable = Bundle.main.bundleURL.pathExtension == "app"
 
     // Menu items we update live / on open.
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let endChimeItem = NSMenuItem(title: "Chime when a break ends", action: #selector(toggleEndChime), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")
     private let resumeItem = NSMenuItem(title: "Resume", action: #selector(resume), keyEquivalent: "")
+    private let vaultItem = NSMenuItem(title: "", action: #selector(rebuildReport), keyEquivalent: "")
     private var eyeEvery: NSMenuItem!
     private var eyeLen: NSMenuItem!
     private var moveEvery: NSMenuItem!
@@ -63,10 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let vault = Settings.vaultPath
             if !vault.isEmpty { Report.updateVault(vault) }
         }
-        scheduler.onBreakDue = { [weak self] kind in
+        scheduler.onBreakDue = { [weak self] kind, refusals in
             guard let self else { return }
             self.scheduler.overlayShowing = true
-            self.overlay.show(kind)
+            self.overlay.show(kind, refusals: refusals)
         }
         scheduler.onMeetingDuringBreak = { [weak self] in self?.overlay.dismissForMeeting() }
         scheduler.onCallNudge = { [weak self] kind in self?.deliverCallNudge(kind) }
@@ -90,9 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func buildMenu() -> NSMenu {
         let m = NSMenu()
         m.delegate = self
+        // The two status lines below carry the numbers that matter, including how
+        // far overdue you are. AppKit greys a disabled item, and greyed-out is not
+        // an option for those, so nothing here is auto-disabled: they stay full
+        // contrast with no action, rather than borrowing a no-op one.
+        m.autoenablesItems = false
 
-        headerItem.isEnabled = false
-        detailItem.isEnabled = false
         m.addItem(headerItem)
         m.addItem(detailItem)
         m.addItem(.separator())
@@ -123,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let rs = NSMenu()
         add(rs, "Show stats…", #selector(showStats))
         rs.addItem(.separator())
+        vaultItem.target = self   // clicking it retries the write, which is what you'd want anyway
+        rs.addItem(vaultItem)
         add(rs, "Log to Obsidian vault…", #selector(chooseVault))
         add(rs, "Open today's note", #selector(openToday))
         add(rs, "Open dashboard", #selector(openDashboard))
@@ -192,11 +199,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         endChimeItem.state = Settings.endChime ? .on : .off
         loginItem.state = LoginItem.isEnabled ? .on : .off
         resumeItem.isEnabled = scheduler.isPaused
+        vaultItem.title = vaultStatusLine()
         tick(eyeEvery, Settings.int(.eyeIntervalMin))
         tick(eyeLen, Settings.int(.eyeDurationSec))
         tick(moveEvery, Settings.int(.moveIntervalMin))
         tick(moveLen, Settings.int(.moveDurationSec))
         tick(awayReset, Settings.int(.awayResetMin))
+    }
+
+    /// Say plainly whether vault logging is working. A silent no-op for weeks is
+    /// the failure mode this line exists to prevent.
+    private func vaultStatusLine() -> String {
+        guard !Settings.vaultPath.isEmpty else { return "Vault: not logging" }
+        let h = Report.vaultHealth      // read when the menu opens; no second copy to keep in step
+        if h.isFailing {
+            let n = h.consecutiveFailures
+            return "Vault: can't write (\(n) attempt\(n == 1 ? "" : "s")) — \(h.lastError ?? "unknown")"
+        }
+        return "Vault: OK\(h.lastSuccess.map { ", last write \(hm($0))" } ?? "")"
     }
 
     private func tick(_ parent: NSMenuItem, _ current: Int) {
@@ -234,7 +254,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func render(_ s: Scheduler.Status) {
         let nudging = (nudgeUntil.map { $0 > Date() } ?? false) && !s.paused
-        statusItem.button?.image = IconMaker.statusImage(paused: s.paused, nudge: nudging)
+        // The pupil widens over the eye interval, and past due the lid keeps
+        // closing and the eye sags — so putting a break off again and again is
+        // visible on the bar instead of free. The strain comes straight from the
+        // scheduler's counter (seconds since your eyes actually rested), which is
+        // why extending no longer snaps the icon back to rested.
+        let strain = min(2.0, max(0, s.eye.strain))
+        let step = Int((strain * 12).rounded())   // 24 steps over 0…2: a 1s tick only redraws on a visible change
+        let key = "\(s.paused)-\(nudging)-\(step)"
+        if key != iconKey {
+            iconKey = key
+            statusItem.button?.image = IconMaker.statusImage(paused: s.paused, nudge: nudging, strain: CGFloat(step) / 12)
+        }
 
         let summary: String
         if s.paused {
@@ -243,16 +274,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             summary = Settings.callBreaks ? "In a call, nudging gently" : "In a call, holding"
         } else if s.away {
             summary = "Away, break waiting for you"
+        } else if s.inDebt {
+            summary = overdueSummary(s)
         } else if let at = s.scheduledAt, isSooner(at, than: s) {
             summary = "Break at \(hm(at))"
         } else {
-            let next = [s.eyeRemaining, s.moveRemaining].compactMap { $0 }.min()
-            summary = next.map { "Next break in \(clock($0))" } ?? "No breaks enabled"
+            summary = s.nextIn.map { "Next break in \(clock($0))" } ?? "No breaks enabled"
         }
 
-        var bits: [String] = []
-        if let e = s.eyeRemaining { bits.append("Eyes \(clock(e))") }
-        if let mv = s.moveRemaining { bits.append("Move \(clock(mv))") }
+        var bits: [String] = s.enabled.map { "\($0.name) \(reading($0))" }
         if let at = s.scheduledAt { bits.append("Scheduled \(hm(at))") }
         let detail = bits.isEmpty ? "All breaks off" : bits.joined(separator: "   ·   ")
 
@@ -263,9 +293,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         popModel.detailText = detail
     }
 
+    /// The header line when a break is owed. Says how far behind you are and, if
+    /// you've been extending, how many times — the number the old build threw away
+    /// every time it reset the counter.
+    /// The header line when a break is owed. Says how far behind you are and, if
+    /// you've been extending, how many times — the number the old build threw away
+    /// every time it reset the counter. Which gauge is "worst" is the scheduler's
+    /// call, not re-decided here.
+    private func overdueSummary(_ s: Scheduler.Status) -> String {
+        guard let g = s.worst else { return "No breaks enabled" }
+        let late = "\(g.name) break \(clock(g.overdue)) overdue"
+        return g.refusals > 0 ? "\(late), put off \(g.refusals)×" : late
+    }
+
+    /// One gauge as text: the countdown, or how far past due it has run. Overdue is
+    /// shown as a plain "+m:ss over", never hidden or clamped to zero.
+    private func reading(_ g: Scheduler.Gauge) -> String {
+        g.overdue > 0 ? "+\(clock(g.overdue)) over" : clock(g.remaining)
+    }
+
     private func isSooner(_ date: Date, than s: Scheduler.Status) -> Bool {
-        let recurring = [s.eyeRemaining, s.moveRemaining].compactMap { $0 }.min()
-        guard let r = recurring else { return true }
+        guard let r = s.nextIn else { return true }
         return date.timeIntervalSinceNow < Double(r)
     }
 
@@ -327,6 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc private func pauseTomorrow() { scheduler.pauseUntilTomorrow() }
     @objc private func resume() { scheduler.resume() }
     @objc private func quit() { NSApp.terminate(nil) }
+
 
     // MARK: reporting
 

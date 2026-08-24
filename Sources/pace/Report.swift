@@ -6,7 +6,7 @@ import Foundation
 struct BreakEvent: Codable {
     let at: Date
     let kind: String        // "eye" | "move"
-    let outcome: String     // "completed" | "skipped" | "snoozed"
+    let outcome: String     // "completed" | "skipped" | "snoozed" | "interrupted" | "nudged"
     let seconds: Int        // rest seconds credited (completed only)
 }
 
@@ -23,15 +23,53 @@ enum Report {
     private static let enc: JSONEncoder = { let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e }()
     private static let dec: JSONDecoder = { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }()
 
+    /// All disk work happens here, off the main thread. The vault can be a folder
+    /// on an unmounted network volume, and a blocking write on the main thread
+    /// would stall the run loop — which *is* the break timer and the overlay
+    /// countdown. One serial queue keeps the ordering guarantees a log needs.
+    private static let io = DispatchQueue(label: "global.ampeco.pace.report", qos: .utility)
+
+    /// What the last vault write did, published back on the main thread so the
+    /// menu can say so. `nil` means fine. Failures are not fatal and not sticky:
+    /// the next break tries again, so a volume that comes back heals itself.
+    struct VaultHealth {
+        var lastError: String?
+        var consecutiveFailures = 0
+        var lastSuccess: Date?
+        var isFailing: Bool { consecutiveFailures > 0 }
+
+        /// Fold one attempt in. Pure on purpose: the run of consecutive failures is
+        /// the part that carries meaning ("it's been broken for a while, not a
+        /// blip"), and a pure fold can be checked without a disk to break.
+        func folding(_ problem: String?, at now: Date) -> VaultHealth {
+            guard let problem else {
+                return VaultHealth(lastError: nil, consecutiveFailures: 0, lastSuccess: now)
+            }
+            return VaultHealth(lastError: problem,
+                               consecutiveFailures: consecutiveFailures + 1,
+                               lastSuccess: lastSuccess)
+        }
+    }
+
+    /// Read on the main thread by the menu when it opens. One copy, no callback.
+    private(set) static var vaultHealth = VaultHealth()
+
     // MARK: log (always, source of truth)
 
     static func log(kind: String, outcome: String, seconds: Int, now: Date = Date()) {
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ev = BreakEvent(at: now, kind: kind, outcome: outcome, seconds: seconds)
         guard let data = try? enc.encode(ev), let line = String(data: data, encoding: .utf8) else { return }
-        append(line + "\n", to: logURL)
+        io.async {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            append(line + "\n", to: logURL)
+        }
     }
 
+    /// Read the log. Deliberately *not* serialised behind `io`: the log is
+    /// append-only and every line decodes on its own, so the worst a concurrent
+    /// write can do is leave a half-written last line, which `compactMap` drops.
+    /// Queueing reads behind a slow vault write would stall the stats window for
+    /// no benefit.
     static func events() -> [BreakEvent] {
         guard let text = try? String(contentsOf: logURL, encoding: .utf8) else { return [] }
         return text.split(separator: "\n").compactMap { try? dec.decode(BreakEvent.self, from: Data($0.utf8)) }
@@ -80,10 +118,21 @@ enum Report {
         vaultBase(vaultPath).appendingPathComponent("pace-dashboard.md")
     }
 
-    /// Rewrite today's note (or all days) and the dashboard from the log.
+    /// Rewrite today's note (or all days) and the dashboard from the log. Runs off
+    /// the main thread and reports what happened rather than swallowing it, so a
+    /// vault that has moved, been deleted, or gone offline is visible in the menu
+    /// instead of silently doing nothing for weeks.
     static func updateVault(_ vaultPath: String, rebuildAll: Bool = false, now: Date = Date()) {
         guard !vaultPath.isEmpty else { return }
-        render(events(), base: vaultBase(vaultPath), rebuildAll: rebuildAll, now: now)
+        io.async {
+            let evs = events()
+            let problem = render(evs, base: vaultBase(vaultPath), rebuildAll: rebuildAll, now: now)
+            DispatchQueue.main.async { recordVault(problem, at: now) }
+        }
+    }
+
+    private static func recordVault(_ problem: String?, at now: Date) {
+        vaultHealth = vaultHealth.folding(problem, at: now)
     }
 
     /// Render a folder of sample notes (for `pace --report-demo <dir>`), so the
@@ -98,19 +147,32 @@ enum Report {
             for m in 0..<(1 + d % 3) { evs.append(BreakEvent(at: base.addingTimeInterval(Double(10 * 3600 + m * 3000)), kind: "move", outcome: "completed", seconds: 60)) }
             if d % 2 == 0 { evs.append(BreakEvent(at: base.addingTimeInterval(11 * 3600), kind: "eye", outcome: "skipped", seconds: 0)) }
         }
-        render(evs, base: URL(fileURLWithPath: path).appendingPathComponent("pace", isDirectory: true), rebuildAll: true, now: now)
+        _ = render(evs, base: URL(fileURLWithPath: path).appendingPathComponent("pace", isDirectory: true), rebuildAll: true, now: now)
     }
 
-    private static func render(_ evs: [BreakEvent], base: URL, rebuildAll: Bool, now: Date) {
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let byDay = Dictionary(grouping: evs) { dayKey($0.at) }
-        if rebuildAll {
-            for (day, list) in byDay { write(dayNote(day, list), to: base.appendingPathComponent("\(day).md")) }
-        } else {
-            let today = dayKey(now)
-            write(dayNote(today, byDay[today] ?? []), to: base.appendingPathComponent("\(today).md"))
+    /// Try one vault write and say what happened, for `pace --check`. The same
+    /// code path the app uses, run synchronously so the CLI can report it.
+    static func probeVault(_ vaultPath: String, now: Date = Date()) -> String? {
+        guard !vaultPath.isEmpty else { return "not logging" }
+        return io.sync { render(events(), base: vaultBase(vaultPath), rebuildAll: false, now: now) }
+    }
+
+    /// Returns nil on success, or a short human-readable reason on failure.
+    private static func render(_ evs: [BreakEvent], base: URL, rebuildAll: Bool, now: Date) -> String? {
+        do {
+            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            let byDay = Dictionary(grouping: evs) { dayKey($0.at) }
+            if rebuildAll {
+                for (day, list) in byDay { try write(dayNote(day, list), to: base.appendingPathComponent("\(day).md")) }
+            } else {
+                let today = dayKey(now)
+                try write(dayNote(today, byDay[today] ?? []), to: base.appendingPathComponent("\(today).md"))
+            }
+            try write(dashboard(byDay, now: now), to: base.appendingPathComponent("pace-dashboard.md"))
+            return nil
+        } catch {
+            return (error as NSError).localizedDescription
         }
-        write(dashboard(byDay, now: now), to: base.appendingPathComponent("pace-dashboard.md"))
     }
 
     // MARK: markdown builders
@@ -227,7 +289,7 @@ enum Report {
         }
     }
 
-    private static func write(_ text: String, to url: URL) {
-        try? text.data(using: .utf8)?.write(to: url)
+    private static func write(_ text: String, to url: URL) throws {
+        try Data(text.utf8).write(to: url, options: .atomic)
     }
 }

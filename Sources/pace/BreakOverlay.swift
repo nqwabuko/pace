@@ -6,14 +6,25 @@ import SwiftUI
 final class BreakVM: ObservableObject {
     let kind: BreakKind
     let prompt: Prompt
+    let refusals: Int          // times this break has been put off since you last took one
     @Published var remaining: Int
     var onSkip: () -> Void = {}
     var onSnooze: () -> Void = {}
     var onDone: () -> Void = {}
-    init(kind: BreakKind, remaining: Int) {
+    init(kind: BreakKind, remaining: Int, refusals: Int) {
         self.kind = kind
         self.remaining = remaining
+        self.refusals = refusals
         self.prompt = Tips.random(for: kind)
+    }
+
+    /// Said once, plainly, when you've put this one off before. Not a scold: the
+    /// point is that extending is no longer invisible.
+    var debtLine: String? {
+        guard refusals > 0 else { return nil }
+        return refusals == 1
+            ? "You put this one off once already."
+            : "You've put this one off \(refusals) times."
     }
 }
 
@@ -38,6 +49,11 @@ private struct BreakView: View {
                 .frame(height: 60)
             Text(vm.kind.title)
                 .font(.system(size: 30, weight: .semibold))
+            if let debt = vm.debtLine {
+                Text(debt)
+                    .font(.system(size: 15, weight: .medium))
+                    .padding(.top, -12)
+            }
 
             VStack(spacing: 8) {
                 Text(vm.prompt.line)
@@ -96,19 +112,25 @@ final class OverlayController {
     private var window: BreakWindow?
     private var vm: BreakVM?
     private var countdown: Timer?
+    private var watchdog: Timer?
     private var escMonitor: Any?
     private var currentKind: BreakKind?
+    private var startedAt: Date?
+    private var durationSec = 0
     private(set) var isShowing = false
 
-    /// Called with the reason when a break ends (completed / skipped / snoozed).
+    /// Called with the reason when a break ends (completed / skipped / snoozed /
+    /// interrupted).
     var onEnd: ((BreakKind, BreakEndReason) -> Void)?
 
-    func show(_ kind: BreakKind) {
+    func show(_ kind: BreakKind, refusals: Int = 0) {
         guard !isShowing else { return }
         isShowing = true
         currentKind = kind
+        durationSec = kind.durationSec
+        startedAt = Date()
 
-        let vm = BreakVM(kind: kind, remaining: kind.durationSec)
+        let vm = BreakVM(kind: kind, remaining: durationSec, refusals: refusals)
         vm.onSkip = { [weak self] in self?.dismiss(.skipped) }
         vm.onSnooze = { [weak self] in self?.dismiss(.snoozed) }
         vm.onDone = { [weak self] in self?.dismiss(.completed) }   // already did it: credit + chime
@@ -138,27 +160,44 @@ final class OverlayController {
             return event
         }
 
-        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.step() }
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.step() }
         RunLoop.main.add(t, forMode: .common)
         countdown = t
+
+        // Independent one-shot backstop. A full-screen window that covers the
+        // whole display must never be able to outlive its own countdown, so a
+        // second timer closes it even if the first never fires again.
+        let w = Timer(timeInterval: Double(durationSec) + 5, repeats: false) { [weak self] _ in
+            self?.dismiss(.completed)
+        }
+        RunLoop.main.add(w, forMode: .common)
+        watchdog = w
     }
 
-    /// Close the window immediately (used when a call starts mid-break).
+    /// Close the window immediately (used when a call starts mid-break). Logged as
+    /// `interrupted`, not `skipped`: the user didn't refuse anything, so it must
+    /// not read as an ignored break in the stats.
     func dismissForMeeting() {
         guard isShowing else { return }
-        dismiss(.skipped)
+        dismiss(.interrupted)
     }
 
+    /// Recompute what's left from the clock rather than counting ticks, so a
+    /// starved run loop or a slept machine can't leave the countdown wrong (or
+    /// stuck) — it just catches up on the next fire.
     private func step() {
-        guard let vm else { return }
-        vm.remaining -= 1
-        if vm.remaining <= 0 { dismiss(.completed) }
+        guard let vm, let startedAt else { return }
+        let left = Double(durationSec) - Date().timeIntervalSince(startedAt)
+        let whole = Int(left.rounded(.up))
+        if whole != vm.remaining { vm.remaining = max(0, whole) }
+        if left <= 0 { dismiss(.completed) }
     }
 
     private func dismiss(_ reason: BreakEndReason) {
         guard isShowing, let kind = currentKind else { return }
         isShowing = false
         countdown?.invalidate(); countdown = nil
+        watchdog?.invalidate(); watchdog = nil
         if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
         // Gentle "done" chime so you know the break ended with your eyes closed
         // or mid-stretch. Only on a natural finish, not a skip.
@@ -167,6 +206,7 @@ final class OverlayController {
         window = nil
         vm = nil
         currentKind = nil
+        startedAt = nil
         onEnd?(kind, reason)
     }
 }

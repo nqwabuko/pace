@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 APP="pace.app"
 BIN="pace"
 ID="global.ampeco.pace"
-VERSION="1.0"
+VERSION="1.1.0"
 
 echo "▸ Building release binary…"
 swift build -c release 2>&1 | grep -vE "XCTest|PlatformPath|xcrun" || true

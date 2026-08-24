@@ -5,7 +5,10 @@ import Foundation
 /// by the scheduler each tick. Keeping this in one place means the menu and the
 /// loop can never disagree about a setting.
 enum Settings {
-    private static let d = UserDefaults.standard
+    /// The backing store. A `var` for exactly one reason: `--sim` points it at a
+    /// throwaway suite so a simulation can never touch your real settings.
+    static var store = UserDefaults.standard
+    private static var d: UserDefaults { store }
 
     // Keys + their defaults, registered once at launch.
     enum Key: String {

@@ -5,40 +5,134 @@ enum BreakKind {
     var title: String { self == .eye ? "Rest your eyes" : "Move your body" }
     var durationSec: Int { self == .eye ? Settings.eyeDurationSec : Settings.moveDurationSec }
     var label: String { self == .eye ? "eye" : "move" }
+    var shortName: String { self == .eye ? "Eye" : "Move" }
     var doneLabel: String { self == .eye ? "Already rested" : "Already moved" }
 }
 
+/// How a break window closed. Only `completed` credits a rest; the rest are
+/// refusals, and a refusal buys quiet, never credit.
 enum BreakEndReason {
-    case completed, skipped, snoozed
+    case completed      // sat through it, or said "already rested"
+    case snoozed        // "+5 min"
+    case skipped        // "Skip"
+    case interrupted    // a call started: not the user's choice, so not their fault
+
     var logName: String {
         switch self {
-        case .completed: return "completed"
-        case .skipped:   return "skipped"
-        case .snoozed:   return "snoozed"
+        case .completed:   return "completed"
+        case .skipped:     return "skipped"
+        case .snoozed:     return "snoozed"
+        case .interrupted: return "interrupted"
         }
     }
+
+    /// Does this rest you? Exactly one reason does.
+    var creditsRest: Bool { self == .completed }
+
+    /// How long the break stays quiet before it is due again.
+    var deferSec: TimeInterval {
+        switch self {
+        case .completed:   return 0
+        case .snoozed:     return Deferral.snoozeSec
+        case .skipped:     return Deferral.skipSec
+        case .interrupted: return Deferral.interruptSec
+        }
+    }
+
+    /// Does this count against you as "putting it off"? A call interrupting a
+    /// break doesn't; choosing to extend or skip does.
+    var isRefusal: Bool { self == .snoozed || self == .skipped }
+}
+
+/// What putting a break off costs. The answer is: only time, never credit. The
+/// counter keeps climbing through every deferral, so the debt (and the menu-bar
+/// eye) keeps getting worse the longer you hold out. Declared here as data so
+/// there is one place to read the policy, and none to derive it by arithmetic.
+enum Deferral {
+    static let snoozeSec: TimeInterval = 5 * 60      // "+5 min" means five minutes
+    static let skipSec: TimeInterval = 10 * 60       // "Skip" buys longer quiet
+    static let interruptSec: TimeInterval = 2 * 60   // a call cut it short: try again soon
+    static let nudgeSec: TimeInterval = 5 * 60       // gap between on-call nudges
+}
+
+/// The outside world the loop reads: two clocks and two sensors. Injected so the
+/// loop can be driven deterministically by `pace --sim`, with no mic and no
+/// waiting. `work` is monotonic and excludes system sleep — asleep eyes aren't
+/// straining — while `wall` is real time, which is what "away for 20 minutes"
+/// and "quiet until 3:05" actually mean.
+struct Env {
+    var work: () -> Double = { ProcessInfo.processInfo.systemUptime }
+    var wall: () -> Date = { Date() }
+    var inCall: () -> Bool = { Signals.inCall() }
+    var idleSec: () -> Double = { Signals.idleSeconds() }
 }
 
 /// The core feedback loop: one 1-second tick that advances two counters (eye,
-/// move) toward their intervals and fires a break when one is due. It holds
-/// during calls, keeps counting while the screen is locked (so a loo break
-/// doesn't wipe your progress), and only resets after a long enough locked break,
-/// on unlock. Time spent reading with the screen unlocked never resets. All
-/// decisions read `Settings` live, so changing a setting in the menu takes effect
-/// on the next tick with no extra wiring.
+/// move) toward their intervals and fires a break when one is due.
+///
+/// The one invariant everything else follows from: a counter measures **seconds
+/// of screen work since that break type last actually rested you**. Showing you
+/// a break doesn't reset it. Extending or skipping doesn't reset it. Only
+/// sitting through a break, saying you already took one, or a long enough
+/// locked-away spell does. So if you keep extending, the debt keeps growing and
+/// the bar keeps showing it.
+///
+/// It holds during calls, keeps counting while the screen is locked (so a loo
+/// break doesn't wipe your progress), and reads `Settings` live, so changing a
+/// setting in the menu takes effect on the next tick with no extra wiring.
 final class Scheduler {
-    private var eyeElapsed = 0
-    private var moveElapsed = 0
+
+    /// One break type's state. Keeping the counter and its deferral together in
+    /// one value is what stops the pair drifting apart when only half of it gets
+    /// updated — the bug that used to hand you a free eye rest for snoozing a
+    /// movement break.
+    private struct Track {
+        var elapsed: Double = 0     // seconds of screen work since a real rest
+        var deferUntil: Date?       // put off: quiet until then, debt still climbing
+        var refusals = 0            // times put off since the last real rest
+        var lastNudge: Date?        // last on-call nudge; its own gap, not the break's
+
+        mutating func rested() { elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil }
+
+        /// A nudge has its own quiet gap so a long call doesn't buzz every second.
+        /// Deliberately separate from `deferUntil`: the break is still owed, so
+        /// when the call ends it comes up at once rather than waiting out a gap it
+        /// never asked for.
+        func canNudge(now: Date) -> Bool {
+            lastNudge.map { now.timeIntervalSince($0) >= Deferral.nudgeSec } ?? true
+        }
+
+        mutating func put(off seconds: TimeInterval, now: Date, refusal: Bool) {
+            deferUntil = now.addingTimeInterval(seconds)
+            if refusal { refusals += 1 }
+        }
+
+        func isDue(interval: Double, now: Date) -> Bool {
+            elapsed >= interval && (deferUntil.map { now >= $0 } ?? true)
+        }
+
+        /// 0 just rested, 1 due, above 1 overdue by that fraction of an interval.
+        func strain(interval: Double) -> Double {
+            interval > 0 ? elapsed / interval : 0
+        }
+    }
+
+    private var eye = Track()
+    private var move = Track()
     private var pausedUntil: Date?
     private var pending: (date: Date, kind: BreakKind)?   // a one-off typed/scheduled break
     private var timer: Timer?
+    private var lastWork: Double = 0
+
+    /// The outside world. Replaced wholesale by `--sim`.
+    var env = Env()
 
     // Set by the overlay controller so we never stack a second break on the first.
     var overlayShowing = false
 
     // Away tracking, driven by screen lock (not idle time, so reading never
     // counts as away). While locked we keep counting but hold the overlay; on
-    // unlock we reset only if the lock lasted long enough to be a real rest.
+    // unlock we credit a rest only if the lock lasted long enough to be one.
     private var screenLocked = false
     private var lockedSince: Date?
 
@@ -47,21 +141,58 @@ final class Scheduler {
     private var stAway = false
 
     var onTick: ((Status) -> Void)?
-    var onBreakDue: ((BreakKind) -> Void)?
+    var onBreakDue: ((BreakKind, Int) -> Void)?   // kind, times it's already been put off
     var onMeetingDuringBreak: (() -> Void)?   // a call started while a break is up
     var onCallNudge: ((BreakKind) -> Void)?   // a due break during a call (on-call nudges on)
+
+    /// One break type's public reading. A value rather than a handful of loose
+    /// `eye*`/`move*` fields: `Track` exists so the two halves can't drift, and
+    /// flattening it back out here would hand that same hazard straight to the UI.
+    struct Gauge {
+        let kind: BreakKind
+        var enabled: Bool
+        var remaining: Int    // seconds to go; 0 once due or overdue
+        var overdue: Int      // seconds past due; 0 until then
+        var strain: Double    // elapsed / interval, uncapped: above 1 means overdue
+        var refusals: Int     // times put off since the last real rest
+
+        var name: String { kind.shortName }
+    }
 
     struct Status {
         var paused: Bool
         var pausedUntil: Date?
         var meeting: Bool
         var away: Bool
-        var eyeRemaining: Int?   // nil when that break type is disabled
-        var moveRemaining: Int?
         var scheduledAt: Date?   // a one-off typed break, if any
+        var eye: Gauge
+        var move: Gauge
+
+        var enabled: [Gauge] { [eye, move].filter(\.enabled) }
+
+        /// The gauge worth talking about: whichever is furthest past due, with the
+        /// eye winning a tie because it comes round more often. The one place that
+        /// decides "which is worse" — spelled out rather than sorted, so there's no
+        /// question about tie order.
+        var worst: Gauge? {
+            switch (eye.enabled, move.enabled) {
+            case (true, true):   return eye.overdue >= move.overdue ? eye : move
+            case (true, false):  return eye
+            case (false, true):  return move
+            case (false, false): return nil
+            }
+        }
+
+        /// Any break owed past its due time? What the worsening glyph and the
+        /// "you keep extending" copy both hang off.
+        var inDebt: Bool { enabled.contains { $0.overdue > 0 } }
+
+        /// Seconds until the next recurring break, if any is enabled.
+        var nextIn: Int? { enabled.map(\.remaining).min() }
     }
 
     func start() {
+        lastWork = env.work()
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -70,40 +201,46 @@ final class Scheduler {
 
     // MARK: user actions
 
-    func pause(for seconds: TimeInterval) { pausedUntil = Date().addingTimeInterval(seconds); tick() }
+    func pause(for seconds: TimeInterval) { pausedUntil = env.wall().addingTimeInterval(seconds); tick() }
 
     func pauseUntilTomorrow() {
         let cal = Calendar.current
-        let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: env.wall()))!
         pausedUntil = cal.date(bySettingHour: 6, minute: 0, second: 0, of: tomorrow)
         tick()
     }
 
     func pause(until date: Date) { pausedUntil = date; tick() }
 
-    var isPaused: Bool { pausedUntil.map { $0 > Date() } ?? false }
+    var isPaused: Bool { pausedUntil.map { $0 > env.wall() } ?? false }
     func resume() { pausedUntil = nil; tick() }
 
     /// Screen lock / unlock (from the workspace notifications). Locking marks you
-    /// away; unlocking after a long enough lock counts as a real rest and resets.
+    /// away; unlocking after a long enough lock is a real rest, so it credits one.
     func setScreenLocked(_ locked: Bool) {
         if locked {
             screenLocked = true
-            lockedSince = Date()
+            lockedSince = env.wall()
         } else {
-            if let since = lockedSince, Date().timeIntervalSince(since) >= Double(Settings.awayResetSec) {
-                eyeElapsed = 0          // a real, long-enough break happened
-                moveElapsed = 0
-            }
-            screenLocked = false
-            lockedSince = nil
-            tick()                      // back at the desk: fire an owed break now if due
+            unlock()
         }
+        tick()
+    }
+
+    /// The unlock half, without the re-tick, so the missed-notification watchdog
+    /// in `tick` can reuse it without recursing.
+    private func unlock() {
+        if let since = lockedSince, env.wall().timeIntervalSince(since) >= Double(Settings.awayResetSec) {
+            eye.rested()            // a real, long-enough break happened
+            move.rested()
+        }
+        screenLocked = false
+        lockedSince = nil
     }
 
     /// Schedule one break (typed via the popover). Scheduling implies intent, so
     /// it clears any active pause.
-    func scheduleBreak(after t: TimeInterval, kind: BreakKind) { pending = (Date().addingTimeInterval(t), kind); pausedUntil = nil; tick() }
+    func scheduleBreak(after t: TimeInterval, kind: BreakKind) { pending = (env.wall().addingTimeInterval(t), kind); pausedUntil = nil; tick() }
     func scheduleBreak(at date: Date, kind: BreakKind) { pending = (date, kind); pausedUntil = nil; tick() }
 
     /// Apply a parsed command from the text entry.
@@ -116,46 +253,88 @@ final class Scheduler {
         }
     }
 
-    /// Manual "take a break now" from the menu.
+    /// Manual "take a break now" from the menu. Asking for a break doesn't rest
+    /// you; taking it does, so nothing is credited here.
     func triggerNow(_ kind: BreakKind) {
         guard !overlayShowing else { return }
-        reset(for: kind)
-        onBreakDue?(kind)
+        onBreakDue?(kind, refusals(of: kind))
     }
 
-    /// Called by the overlay controller when a break window closes.
+    /// Called by the overlay controller when a break window closes. The single
+    /// place a rest is credited.
     func breakFinished(_ kind: BreakKind, _ reason: BreakEndReason) {
-        // completed / skipped: counters were already reset when the break fired.
-        // snoozed: re-arm this break to fire again in 5 minutes.
-        if reason == .snoozed {
-            let inFive = 5 * 60
-            if kind == .eye { eyeElapsed = max(0, Settings.eyeIntervalSec - inFive) }
-            else            { moveElapsed = max(0, Settings.moveIntervalSec - inFive) }
+        if reason.creditsRest {
+            credit(kind)
+        } else {
+            let now = env.wall()
+            withTrack(kind) { $0.put(off: reason.deferSec, now: now, refusal: reason.isRefusal) }
+            // Putting one break off quiets the other one too, for at least as long.
+            // "+5 min" means "leave me alone for five minutes", not "leave this one
+            // counter alone" — without this, snoozing a movement break can pop an
+            // eye break in the same breath. It buys quiet only: the other counter
+            // keeps climbing and it isn't recorded as a refusal, because it wasn't.
+            let other: BreakKind = kind == .eye ? .move : .eye
+            withTrack(other) {
+                let floor = now.addingTimeInterval(reason.deferSec)
+                if ($0.deferUntil ?? now) < floor { $0.deferUntil = floor }
+            }
         }
+        tick()
     }
 
     // MARK: the loop
 
-    private func reset(for kind: BreakKind) {
-        // A movement break rests the eyes too, so it clears both counters.
-        if kind == .move { moveElapsed = 0; eyeElapsed = 0 }
-        else { eyeElapsed = 0 }
+    private func withTrack(_ kind: BreakKind, _ body: (inout Track) -> Void) {
+        if kind == .eye { body(&eye) } else { body(&move) }
     }
 
+    private func refusals(of kind: BreakKind) -> Int { kind == .eye ? eye.refusals : move.refusals }
+
+    /// Credit a real rest. A movement break rests the eyes too, so it clears
+    /// both — but only ever for a break that was actually taken.
+    private func credit(_ kind: BreakKind) {
+        if kind == .move { move.rested(); eye.rested() }
+        else { eye.rested() }
+    }
+
+    /// Real awake seconds since the last tick, from the monotonic work clock. The
+    /// timer is only a nudge to look at the clock, never the clock itself: if the
+    /// run loop is starved (App Nap, a slow write) the next tick still counts every
+    /// second that passed, so the loop heals instead of silently losing time.
+    private func elapsedSinceLastTick() -> Double {
+        let now = env.work()
+        let delta = max(0, now - lastWork)
+        lastWork = now
+        return delta
+    }
+
+    /// Advance the loop one step, reading the injected clock. `start()`'s timer
+    /// calls this once a second; `--sim` calls it directly so a whole scenario can
+    /// run in milliseconds. The only reason `tick` has a public door at all.
+    func step() { tick() }
+
     private func tick() {
+        let now = env.wall()
+        let delta = elapsedSinceLastTick()
         stMeeting = false
         stAway = false
         defer { emit() }
 
+        // Self-heal a missed unlock notification: if we think the screen is
+        // locked but there has been human input in the last couple of seconds,
+        // we are demonstrably back at the desk. Without this a single dropped
+        // notification would wedge the app in "away" forever.
+        if screenLocked, env.idleSec() < 2 { unlock() }
+
         if let until = pausedUntil {
-            if Date() < until { return }
+            if now < until { return }
             pausedUntil = nil
         }
 
         // On a call. By default we hold breaks until it ends. With on-call nudges
         // enabled we instead keep counting and deliver a gentle nudge at the fire
-        // points below (via `onCall`), so call-heavy days still get micro-breaks.
-        let onCall = Settings.meetingAware && Signals.inCall()
+        // points below, so call-heavy days still get micro-breaks.
+        let onCall = Settings.meetingAware && env.inCall()
         if onCall {
             stMeeting = true
             if overlayShowing { onMeetingDuringBreak?() }   // never cover a call
@@ -165,50 +344,70 @@ final class Scheduler {
         // Screen locked = genuinely away. Keep counting so the break you're owed
         // is waiting when you unlock, but hold the overlay meanwhile. Reading with
         // the screen unlocked never counts as away, so it never resets and you
-        // still get your breaks. The reset (if the lock was long) happens in
-        // setScreenLocked on unlock.
+        // still get your breaks. The credit (if the lock was long) happens in
+        // `unlock`.
         if Settings.idleAware && screenLocked {
             stAway = true
-            eyeElapsed += 1
-            moveElapsed += 1
+            eye.elapsed += delta
+            move.elapsed += delta
             return
         }
 
         if overlayShowing { return }
 
         // A typed one-off break fires first, once its time arrives.
-        if let p = pending, Date() >= p.date {
+        if let p = pending, now >= p.date {
             pending = nil
             fire(p.kind, onCall: onCall)
             return
         }
 
-        eyeElapsed += 1
-        moveElapsed += 1
+        eye.elapsed += delta
+        move.elapsed += delta
 
-        if Settings.moveEnabled && moveElapsed >= Settings.moveIntervalSec {
+        if Settings.moveEnabled, move.isDue(interval: Double(Settings.moveIntervalSec), now: now) {
             fire(.move, onCall: onCall)
-        } else if Settings.eyeEnabled && eyeElapsed >= Settings.eyeIntervalSec {
+        } else if Settings.eyeEnabled, eye.isDue(interval: Double(Settings.eyeIntervalSec), now: now) {
             fire(.eye, onCall: onCall)
         }
     }
 
     /// Deliver a due break: a gentle nudge while on a call (on-call nudges on),
-    /// otherwise the full overlay. Resets the counter either way.
+    /// otherwise the full overlay. Nothing is credited either way — showing you a
+    /// break is not resting, so the counter keeps climbing through a whole call.
     private func fire(_ kind: BreakKind, onCall: Bool) {
-        reset(for: kind)
-        if onCall { onCallNudge?(kind) } else { onBreakDue?(kind) }
+        guard onCall else { onBreakDue?(kind, refusals(of: kind)); return }
+        let now = env.wall()
+        var nudge = false
+        withTrack(kind) {
+            guard $0.canNudge(now: now) else { return }
+            $0.lastNudge = now
+            nudge = true
+        }
+        if nudge { onCallNudge?(kind) }
     }
 
     private func emit() {
-        let status = Status(
+        onTick?(Status(
             paused: isPaused,
             pausedUntil: pausedUntil,
             meeting: stMeeting,
             away: stAway,
-            eyeRemaining: Settings.eyeEnabled ? max(0, Settings.eyeIntervalSec - eyeElapsed) : nil,
-            moveRemaining: Settings.moveEnabled ? max(0, Settings.moveIntervalSec - moveElapsed) : nil,
-            scheduledAt: pending?.date)
-        onTick?(status)
+            scheduledAt: pending?.date,
+            eye: gauge(.eye, eye, enabled: Settings.eyeEnabled, interval: Double(Settings.eyeIntervalSec)),
+            move: gauge(.move, move, enabled: Settings.moveEnabled, interval: Double(Settings.moveIntervalSec))))
+    }
+
+    private func gauge(_ kind: BreakKind, _ t: Track, enabled: Bool, interval: Double) -> Gauge {
+        guard enabled else {
+            return Gauge(kind: kind, enabled: false, remaining: 0, overdue: 0, strain: 0, refusals: 0)
+        }
+        return Gauge(
+            kind: kind,
+            enabled: true,
+            remaining: Int(max(0, interval - t.elapsed)),
+            overdue: Int(max(0, t.elapsed - interval)),
+            strain: t.strain(interval: interval),
+            refusals: t.refusals)
     }
 }
