@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let moveItem = NSMenuItem(title: "Move breaks", action: #selector(toggleMove), keyEquivalent: "")
     private let meetingItem = NSMenuItem(title: "Pause during calls", action: #selector(toggleMeeting), keyEquivalent: "")
     private let callBreaksItem = NSMenuItem(title: "On-call nudges (keep breaks during calls)", action: #selector(toggleCallBreaks), keyEquivalent: "")
-    private let idleItem = NSMenuItem(title: "Reset after a long locked break", action: #selector(toggleIdle), keyEquivalent: "")
+    private let idleItem = NSMenuItem(title: "Reset after a long break away", action: #selector(toggleIdle), keyEquivalent: "")
     private let soundItem = NSMenuItem(title: "Sound when a break starts", action: #selector(toggleSound), keyEquivalent: "")
     private let endChimeItem = NSMenuItem(title: "Chime when a break ends", action: #selector(toggleEndChime), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")

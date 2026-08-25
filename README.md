@@ -30,7 +30,10 @@ A one-second feedback loop, like netty's sampler:
    clock and the wall clock diverge by exactly the time asleep). Any of them and
    breaks stop firing, because a break needs someone to show itself to. Below the
    threshold, reading at your desk still counts as screen time and you still get
-   your breaks.
+   your breaks. *Reset after a long break away* controls whether coming back
+   **credits** you a rest, and nothing else: with it off the break you were owed
+   is waiting the moment you sit down, but a break is still never shown to an
+   empty chair.
 4. When a counter hits its interval, a **break overlay** appears. Only three
    things ever reset a counter: sitting the break out, telling it you already
    took one, or a long enough spell away. A movement break rests the eyes too, so

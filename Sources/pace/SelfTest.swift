@@ -93,6 +93,18 @@ enum SelfTest {
         check("and you get the full interval back", "quiet=\(night.quietAfterReturn)s then fired=\(night.firedAfterReturn)",
               night.quietAfterReturn == 19 * 60 && night.firedAfterReturn)
 
+        // Turning off "reset after a long break away" must give back exactly one
+        // thing: the reset. Not the room-emptying overlay that started all this.
+        let optedOut = overnightUntouched(resetOnReturn: false)
+        check("with the reset switched off, still nothing fires at an empty room",
+              "\(optedOut.firesWhileAway) fired", optedOut.firesWhileAway == 0)
+        check("...and the hour away credits nothing, which is what the switch is for",
+              optedOut.awaySec == -1 ? "no rest credited" : "credited \(optedOut.awaySec)s",
+              optedOut.awaySec == -1)
+        check("...so the break you were owed is waiting the moment you're back",
+              "fired after \(optedOut.quietAfterReturn == -1 ? 0 : optedOut.quietAfterReturn)s",
+              optedOut.quietAfterReturn == -1 && optedOut.firedAfterReturn)
+
         let slept = machineSlept()
         check("a sleep the run loop never saw counts as a rest too",
               "away=\(slept.awaySec)s remaining=\(slept.remaining)s of 1080s",
@@ -192,13 +204,14 @@ enum SelfTest {
     /// as screen work, fired a break every twenty minutes and auto-completed each
     /// one, so the morning opened mid-cycle with a break already due and thirty
     /// rests on record that never happened.
-    private static func overnightUntouched()
+    private static func overnightUntouched(resetOnReturn: Bool = true)
         -> (firesWhileAway: Int, awaySec: Int, remainingAtDoor: Int, quietAfterReturn: Int, firedAfterReturn: Bool) {
         var out = (firesWhileAway: -1, awaySec: -1, remainingAtDoor: -1, quietAfterReturn: -1, firedAfterReturn: false)
         withScratchSettings {
             Settings.set(.moveEnabled, false)
             Settings.set(.eyeIntervalMin, 20)
             Settings.set(.awayResetMin, 15)
+            Settings.set(.idleAware, resetOnReturn)
 
             let rig = Rig()
             var fires = 0

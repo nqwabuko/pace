@@ -407,8 +407,16 @@ final class Scheduler {
         // meanwhile. The threshold is the same "away this long is a real rest" you
         // set in the menu, so there is one answer to "have I left" and not two:
         // below it, reading at your desk still counts as screen time and you still
-        // get your breaks. The credit happens in `creditAway`.
-        if Settings.idleAware, screenLocked || idle >= Double(Settings.awayResetSec) {
+        // get your breaks.
+        //
+        // Deliberately *not* behind `idleAware`, which the credits in `creditAway`
+        // are. That switch says "reset my counters when I step away", and it was
+        // briefly holding two powers: turning it off also gave back "fire breaks at
+        // an empty room and auto-complete them", which is the failure this whole
+        // area exists to prevent and not something anybody would choose. Whether a
+        // rest gets credited is a preference. Whether a break is shown to a chair
+        // is not.
+        if screenLocked || idle >= Double(Settings.awayResetSec) {
             stAway = true
             eye.elapsed += delta
             move.elapsed += delta
