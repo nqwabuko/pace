@@ -217,6 +217,12 @@ swift run pace --sim              # run the whole loop against a fake clock
 swift run pace --stats-preview /tmp/s.png   # render the stats window off sample data
 ```
 
+`--check` reports the login item as `n/a` unless you run it from the installed
+bundle (`/Applications/pace.app/Contents/MacOS/pace --check`). `SMAppService`
+registers an .app, so from a bare binary the answer isn't "off", it's unknowable,
+and saying `false` there is how you end up debugging a setting that was never
+unset.
+
 `--check` is the way to verify detection: run it, start a call, run it again, and
 watch `mic-in-use` flip to `true`. Give it a folder and it also tries an actual
 vault write and prints what went wrong, which beats guessing why notes stopped

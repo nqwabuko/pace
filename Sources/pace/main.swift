@@ -84,7 +84,7 @@ if let ci = args.firstIndex(of: "--check") {
     Settings.registerDefaults()
     print("in a call  : \(Signals.inCall())   (mic: \(Signals.micInUse()))")
     print("idle (s)   : \(String(format: "%.1f", Signals.idleSeconds()))")
-    print("login item : \(LoginItem.isEnabled)")
+    print("login item : \(LoginItem.enabled.map(String.init) ?? "n/a — ask the installed app, not this binary")")
     let vault = ci + 1 < args.count ? args[ci + 1] : Settings.vaultPath
     print("vault      : \(vault.isEmpty ? "not logging" : vault)")
     if !vault.isEmpty { print("vault write: \(Report.probeVault(vault) ?? "OK")") }
