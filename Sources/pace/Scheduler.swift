@@ -123,6 +123,7 @@ final class Scheduler {
     private var pending: (date: Date, kind: BreakKind)?   // a one-off typed/scheduled break
     private var timer: Timer?
     private var lastWork: Double = 0
+    private var lastWall: Date?
 
     /// The outside world. Replaced wholesale by `--sim`.
     var env = Env()
@@ -136,12 +137,17 @@ final class Scheduler {
     private var screenLocked = false
     private var lockedSince: Date?
 
-    /// What each track owed at the moment the screen locked. Recorded then rather
-    /// than read at unlock because the counters deliberately keep climbing while
-    /// you're away (so the break you're owed is waiting when you get back), and an
-    /// hour at lunch is not an hour of eye strain. The debt a lunch break cleared
-    /// is the one you walked away with.
-    private var lockedDebt: [Gauge] = []
+    /// What each track owed the last time there was demonstrably a human here.
+    /// The counters deliberately keep climbing while you're away, so that the break
+    /// you're owed is waiting when you get back — which makes *now* the wrong
+    /// reading to record when something finally rests you. An hour at lunch is not
+    /// an hour of eye strain. One field for all three away paths (locked, no input,
+    /// asleep), because "the debt you walked away with" is the same fact in each.
+    private var presentDebt: [Gauge] = []
+
+    /// The idle spell as of the last tick. When input comes back, this is how long
+    /// nobody was there — the sensor that doesn't depend on a notification arriving.
+    private var lastIdle: Double = 0
 
     // Per-tick snapshot, used only to build the UI status.
     private var stMeeting = false
@@ -210,6 +216,8 @@ final class Scheduler {
 
     func start() {
         lastWork = env.work()
+        lastWall = env.wall()
+        presentDebt = currentGauges()
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -238,7 +246,6 @@ final class Scheduler {
         if locked {
             screenLocked = true
             lockedSince = env.wall()
-            lockedDebt = currentGauges()
         } else {
             unlock()
         }
@@ -248,15 +255,28 @@ final class Scheduler {
     /// The unlock half, without the re-tick, so the missed-notification watchdog
     /// in `tick` can reuse it without recursing.
     private func unlock() {
-        if let since = lockedSince, env.wall().timeIntervalSince(since) >= Double(Settings.awayResetSec) {
-            let cleared = lockedDebt
-            eye.rested()            // a real, long-enough break happened
-            move.rested()
-            onAwayRest?(cleared, Int(env.wall().timeIntervalSince(since)))
+        if let since = lockedSince {
+            creditAway(seconds: Int(env.wall().timeIntervalSince(since)))
         }
-        lockedDebt = []
         screenLocked = false
         lockedSince = nil
+    }
+
+    /// Something that isn't a break rested you: a long enough lock, a long enough
+    /// spell with nobody at the machine, or the machine asleep. One door for all
+    /// three, because two of them can land on the same tick — a locked laptop that
+    /// slept and then woke — and a rest has to be credited, and logged, once.
+    ///
+    /// Short spells credit nothing: five minutes away is not a rest, and the
+    /// counter should still be where you left it.
+    private func creditAway(seconds: Int) {
+        guard seconds >= Settings.awayResetSec else { return }
+        guard eye.elapsed > 0 || move.elapsed > 0 else { return }   // already rested; don't log it twice
+        let cleared = presentDebt
+        eye.rested()
+        move.rested()
+        presentDebt = currentGauges()
+        onAwayRest?(cleared, seconds)
     }
 
     /// Schedule one break (typed via the popover). Scheduling implies intent, so
@@ -322,11 +342,15 @@ final class Scheduler {
     /// timer is only a nudge to look at the clock, never the clock itself: if the
     /// run loop is starved (App Nap, a slow write) the next tick still counts every
     /// second that passed, so the loop heals instead of silently losing time.
-    private func elapsedSinceLastTick() -> Double {
+    private func elapsedSinceLastTick() -> (work: Double, wall: Double) {
         let now = env.work()
-        let delta = max(0, now - lastWork)
+        let work = max(0, now - lastWork)
         lastWork = now
-        return delta
+
+        let wallNow = env.wall()
+        let wall = lastWall.map { max(0, wallNow.timeIntervalSince($0)) } ?? work
+        lastWall = wallNow
+        return (work, wall)
     }
 
     /// Advance the loop one step, reading the injected clock. `start()`'s timer
@@ -336,16 +360,31 @@ final class Scheduler {
 
     private func tick() {
         let now = env.wall()
-        let delta = elapsedSinceLastTick()
+        let (delta, wallDelta) = elapsedSinceLastTick()
+        let idle = env.idleSec()
         stMeeting = false
         stAway = false
-        defer { emit() }
+        defer { emit(); lastIdle = idle }
+
+        if Settings.idleAware {
+            // The machine was asleep, or this process was starved, for the gap
+            // between the two clocks: wall time that was not screen work. A clock
+            // can't drop a notification, which is why this is the backstop.
+            creditAway(seconds: Int(wallDelta - delta))
+
+            // Input came back after a long spell of none. This is the case that ran
+            // all night: a Mac held awake and unlocked by something else (audio
+            // assertions, in the event that found it), pace counting screen work and
+            // firing breaks into an empty room, each one auto-completing as a rest
+            // nobody took. A screen that never locks is not a human who never left.
+            if idle < lastIdle { creditAway(seconds: Int(lastIdle)) }
+        }
 
         // Self-heal a missed unlock notification: if we think the screen is
         // locked but there has been human input in the last couple of seconds,
         // we are demonstrably back at the desk. Without this a single dropped
         // notification would wedge the app in "away" forever.
-        if screenLocked, env.idleSec() < 2 { unlock() }
+        if screenLocked, idle < 2 { unlock() }
 
         if let until = pausedUntil {
             if now < until { return }
@@ -362,12 +401,14 @@ final class Scheduler {
             if !Settings.callBreaks { return }
         }
 
-        // Screen locked = genuinely away. Keep counting so the break you're owed
-        // is waiting when you unlock, but hold the overlay meanwhile. Reading with
-        // the screen unlocked never counts as away, so it never resets and you
-        // still get your breaks. The credit (if the lock was long) happens in
-        // `unlock`.
-        if Settings.idleAware && screenLocked {
+        // Away: the screen is locked, or nobody has touched the machine for long
+        // enough that a break has no one to show itself to. Keep counting so the
+        // break you're owed is waiting when you get back, but hold the overlay
+        // meanwhile. The threshold is the same "away this long is a real rest" you
+        // set in the menu, so there is one answer to "have I left" and not two:
+        // below it, reading at your desk still counts as screen time and you still
+        // get your breaks. The credit happens in `creditAway`.
+        if Settings.idleAware, screenLocked || idle >= Double(Settings.awayResetSec) {
             stAway = true
             eye.elapsed += delta
             move.elapsed += delta
@@ -385,6 +426,13 @@ final class Scheduler {
 
         eye.elapsed += delta
         move.elapsed += delta
+
+        // Only this line of the tick is reached with a human demonstrably present
+        // and the counters up to date, which makes it the one honest place to record
+        // "this is what was owed while someone was here". Every path above either
+        // freezes the counters (paused, on a call, a break on screen) or is the
+        // absence itself, so a snapshot that lags one of those is still correct.
+        if idle < 2 { presentDebt = currentGauges() }
 
         if Settings.moveEnabled, move.isDue(interval: Double(Settings.moveIntervalSec), now: now) {
             fire(.move, onCall: onCall)

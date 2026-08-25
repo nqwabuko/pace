@@ -23,18 +23,24 @@ A one-second feedback loop, like netty's sampler:
 2. **Guards** run first. If the **microphone is in use** (any app, so Zoom /
    Teams / Meet / FaceTime / Slack huddles all count, even muted) and
    *meeting-aware* is on, the loop **holds**, a due break fires the moment the
-   call ends. If you've been **locked away** past the reset threshold, both
-   counters reset, so you're never ambushed the instant you sit back down.
-3. When a counter hits its interval, a **break overlay** appears. Only three
+   call ends. If you've been **away** past the reset threshold, both counters
+   reset, so you're never ambushed the instant you sit back down.
+3. **Away means away**, and pace works it out three ways: the screen locked, no
+   input for longer than the reset threshold, or the machine asleep (the work
+   clock and the wall clock diverge by exactly the time asleep). Any of them and
+   breaks stop firing, because a break needs someone to show itself to. Below the
+   threshold, reading at your desk still counts as screen time and you still get
+   your breaks.
+4. When a counter hits its interval, a **break overlay** appears. Only three
    things ever reset a counter: sitting the break out, telling it you already
-   took one, or a long enough locked-away spell. A movement break rests the eyes
-   too, so taking one clears both.
-4. **Putting a break off costs you nothing but time.** *+5 min* buys five
+   took one, or a long enough spell away. A movement break rests the eyes too, so
+   taking one clears both.
+5. **Putting a break off costs you nothing but time.** *+5 min* buys five
    minutes of quiet, *Skip* buys ten, and neither credits you a rest — the
    counter keeps climbing straight through, so the break comes back owing more
    than it did before, and the menu-bar eye keeps getting worse. Extend it four
    times in a row and you can see all four on the bar.
-5. The overlay always **auto-dismisses** at zero and is always **dismissible**
+6. The overlay always **auto-dismisses** at zero and is always **dismissible**
    (Skip, Esc, a click off the card, or a hard key-monitor fallback), plus an
    independent watchdog timer that closes it even if its own countdown dies. A
    window that covers your whole screen should not be able to outlive its clock.
@@ -308,6 +314,13 @@ Failures are visible and temporary, never silent and never fatal:
 - **A dropped screen-unlock notification** used to wedge the app in "away"
   forever. Now, if it thinks the screen is locked while human input is arriving,
   it concludes you're back and carries on.
+- **A Mac held awake and unlocked overnight** (something else holding a power
+  assertion — audio contexts are the usual culprit) used to be indistinguishable
+  from nine hours at the desk, because the only away signal was the screen-lock
+  notification and it never came. The loop counted the whole night as screen work,
+  fired a break every twenty minutes into an empty room, and auto-completed each
+  one as a rest. Away is now decided by the idle clock and the gap between the two
+  clocks as well as the lock, none of which can fail to arrive.
 - **The break window** has an independent watchdog on top of its countdown, so it
   cannot outlive its own clock and sit over your screen.
 

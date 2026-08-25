@@ -80,6 +80,24 @@ enum SelfTest {
               "eye overdue=\(away.overdue)s put off \(away.refusals)× away=\(away.awaySec)s",
               away.overdue == 4 * 60 && away.refusals == 1 && away.awaySec == 20 * 60)
 
+        print("\nabsence — a screen that never locks is not a human who never left")
+        let night = overnightUntouched()
+        check("no break fires while nobody is at the machine", "\(night.firesWhileAway) fired", night.firesWhileAway == 0)
+        check("coming back credits the hour away as a rest", "away=\(night.awaySec)s", night.awaySec == 60 * 60)
+        // Within a tick or two of eighteen minutes left, i.e. the reading from when
+        // he was last at the desk. Read at the point of return it would be 0, with
+        // the whole hour billed as strain. The tolerance is there because the door
+        // is sampled once a second, not because the distinction is fuzzy.
+        check("the rest records the debt at the door, not the hour away",
+              "remaining=\(night.remainingAtDoor)s of 1080s", abs(night.remainingAtDoor - 18 * 60) <= 2)
+        check("and you get the full interval back", "quiet=\(night.quietAfterReturn)s then fired=\(night.firedAfterReturn)",
+              night.quietAfterReturn == 19 * 60 && night.firedAfterReturn)
+
+        let slept = machineSlept()
+        check("a sleep the run loop never saw counts as a rest too",
+              "away=\(slept.awaySec)s remaining=\(slept.remaining)s of 1080s",
+              slept.awaySec >= 60 * 60 && abs(slept.remaining - 18 * 60) <= 2)
+
         print("\nvault health — a broken vault must read as broken, then heal")
         var h = Report.VaultHealth()
         let t = Date(timeIntervalSince1970: 1_755_000_000)
@@ -167,6 +185,92 @@ enum SelfTest {
             sched.setScreenLocked(false)
         }
         return result
+    }
+
+    /// The overnight failure, reproduced: a Mac left awake and unlocked, nobody
+    /// touching it for an hour. Before this, the loop counted every second of that
+    /// as screen work, fired a break every twenty minutes and auto-completed each
+    /// one, so the morning opened mid-cycle with a break already due and thirty
+    /// rests on record that never happened.
+    private static func overnightUntouched()
+        -> (firesWhileAway: Int, awaySec: Int, remainingAtDoor: Int, quietAfterReturn: Int, firedAfterReturn: Bool) {
+        var out = (firesWhileAway: -1, awaySec: -1, remainingAtDoor: -1, quietAfterReturn: -1, firedAfterReturn: false)
+        withScratchSettings {
+            Settings.set(.moveEnabled, false)
+            Settings.set(.eyeIntervalMin, 20)
+            Settings.set(.awayResetMin, 15)
+
+            let rig = Rig()
+            var fires = 0
+            rig.sched.onBreakDue = { _, _ in fires += 1 }
+            rig.sched.onAwayRest = { credits, secs in
+                out.awaySec = secs
+                out.remainingAtDoor = credits.first { $0.kind == .eye }?.remaining ?? -1
+            }
+            rig.sched.start()
+
+            rig.run(2 * 60)                       // two minutes at the desk
+            let before = fires
+            rig.run(60 * 60, untouched: true)     // an hour with nobody there
+            out.firesWhileAway = fires - before
+
+            rig.run(1)                            // a keypress: back at the desk
+            let afterReturn = fires
+            rig.run(19 * 60)                      // the interval you're owed, quiet
+            out.quietAfterReturn = 19 * 60
+            if fires > afterReturn { out.quietAfterReturn = -1 }
+            rig.run(90)
+            out.firedAfterReturn = fires > afterReturn
+        }
+        return out
+    }
+
+    /// The other half of the same hole: the machine actually slept, so no tick ran
+    /// and no notification arrived. The two clocks diverge by exactly the time
+    /// asleep, which is what gives it away.
+    private static func machineSlept() -> (awaySec: Int, remaining: Int) {
+        var out = (awaySec: -1, remaining: -1)
+        withScratchSettings {
+            Settings.set(.moveEnabled, false)
+            Settings.set(.eyeIntervalMin, 20)
+            Settings.set(.awayResetMin, 15)
+
+            let rig = Rig()
+            rig.sched.onAwayRest = { credits, secs in
+                out = (secs, credits.first { $0.kind == .eye }?.remaining ?? -1)
+            }
+            rig.sched.start()
+            rig.run(2 * 60)
+            rig.wall += 60 * 60      // an hour of wall time with the work clock frozen
+            rig.sched.step()
+        }
+        return out
+    }
+
+    /// A scheduler on injected clocks, driven a second at a time. `untouched` grows
+    /// the idle clock instead of resetting it, which is the difference between
+    /// sitting there working and having gone home.
+    private final class Rig {
+        let sched = Scheduler()
+        var work = 30_000.0
+        var wall = Date(timeIntervalSince1970: 1_755_000_000)
+        var idle = 0.0
+
+        init() {
+            sched.env = Env(work: { [unowned self] in self.work },
+                            wall: { [unowned self] in self.wall },
+                            inCall: { false },
+                            idleSec: { [unowned self] in self.idle })
+        }
+
+        func run(_ seconds: Int, untouched: Bool = false) {
+            for _ in 0..<seconds {
+                work += 1
+                wall += 1
+                idle = untouched ? idle + 1 : 0
+                sched.step()
+            }
+        }
     }
 
     /// Run `body` against a throwaway settings domain, so a check can set an
