@@ -12,6 +12,9 @@ enum BreakKey {
     static let returnKeyCodes: Set<UInt16> = [36, 76]   // Return, and the keypad's Enter
 
     static func action(keyCode: UInt16, chars: String?, flags: NSEvent.ModifierFlags) -> BreakKey? {
+        // Esc and Return usually never reach here — SwiftUI's cancel/default
+        // actions claim them first — but a window that covers the whole screen
+        // has to answer to them even if that stops being true.
         if keyCode == escKeyCode { return .skip }   // Esc, whatever is held with it
         if returnKeyCodes.contains(keyCode) { return .done }
         // Command and nothing else that a person chose to hold: ⌘⌥S belongs to
@@ -110,10 +113,11 @@ private struct BreakView: View {
                 .monospacedDigit()
                 .padding(.top, 4)
             // The shortcut sits in the label rather than in a legend under the
-            // buttons: one glance, full size, nothing greyed out. The keys
-            // themselves are handled by the key monitor, not by SwiftUI, so they
-            // work wherever focus happens to be; the two modifiers below are kept
-            // only for what they draw — the default button's highlight.
+            // buttons: one glance, full size, nothing greyed out. The two
+            // modifiers below are load-bearing, not decoration: driving a real
+            // card with synthetic keys shows SwiftUI swallowing Esc before the
+            // key monitor is ever offered it, so deleting `.cancelAction` would
+            // quietly delete Esc.
             HStack(spacing: 12) {
                 Button("Skip  ⌘S") { vm.onSkip() }
                     .keyboardShortcut(.cancelAction)      // draws it as the escape button
@@ -140,8 +144,8 @@ private final class BreakWindow: NSWindow {
 }
 
 /// Shows exactly one break window at a time. The window is always dismissible
-/// (the buttons, Esc, ⌘S, or a click off the card — the keys read by a monitor,
-/// so they don't depend on focus) and always
+/// (the buttons, Esc, ⌘S, or a click off the card — the ⌘ keys read by a
+/// monitor, so they don't depend on where focus landed) and always
 /// auto-closes when the countdown ends, so it can never trap the user. It also
 /// bows out if a call starts while it's up.
 final class OverlayController {
@@ -256,11 +260,16 @@ final class OverlayController {
 
 /// Minimal delegate behind `pace --demo`: pops one break overlay so you can see
 /// (and dismiss) it without waiting out an interval, then quits. Also serves as
-/// the overlay smoke-test.
+/// the overlay smoke-test — it prints how the break ended, so a keypress driven
+/// from the outside can be checked against what the card actually did rather
+/// than against the fact that a window went away.
 final class DemoDelegate: NSObject, NSApplicationDelegate {
     private let overlay = OverlayController()
     func applicationDidFinishLaunching(_ notification: Notification) {
-        overlay.onEnd = { _, _ in NSApp.terminate(nil) }
+        overlay.onEnd = { kind, reason in
+            print("\(kind.label) break ended: \(reason.logName)")
+            NSApp.terminate(nil)
+        }
         overlay.show(.eye)
     }
 }
