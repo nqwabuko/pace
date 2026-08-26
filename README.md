@@ -10,7 +10,7 @@ and Login Items show "pace", and it's ad-hoc signed so it runs after being moved
 
 ```
 menu bar:  👁  ->  click for the menu
-break:     a soft full-screen card, a countdown, Skip / +5 min (Esc always skips)
+break:     a soft full-screen card, a countdown, ⌘S skip / ⌘5 +5 min / ⌘D already did it
 ```
 
 ## How it works
@@ -44,8 +44,9 @@ A one-second feedback loop, like netty's sampler:
    than it did before, and the menu-bar eye keeps getting worse. Extend it four
    times in a row and you can see all four on the bar.
 6. The overlay always **auto-dismisses** at zero and is always **dismissible**
-   (Skip, Esc, a click off the card, or a hard key-monitor fallback), plus an
-   independent watchdog timer that closes it even if its own countdown dies. A
+   (the buttons, **⌘S** or Esc to skip, **⌘5** for five more minutes, **⌘D** or
+   Return for already did it, or a click off the card), plus an independent
+   watchdog timer that closes it even if its own countdown dies. A
    window that covers your whole screen should not be able to outlive its clock.
    If a call starts mid-break, it bows out at once and is logged as
    *interrupted*, not *skipped* — you didn't refuse anything.

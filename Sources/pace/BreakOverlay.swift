@@ -1,6 +1,36 @@
 import AppKit
 import SwiftUI
 
+/// What a key press on the break card means. Kept as a pure mapping off the two
+/// things a key event actually carries, so the self-test can assert the whole
+/// keyboard without a window on screen — and so there is exactly one place
+/// that decides what ⌘S does.
+enum BreakKey {
+    case skip, snooze, done
+
+    static let escKeyCode: UInt16 = 53
+    static let returnKeyCodes: Set<UInt16> = [36, 76]   // Return, and the keypad's Enter
+
+    static func action(keyCode: UInt16, chars: String?, flags: NSEvent.ModifierFlags) -> BreakKey? {
+        if keyCode == escKeyCode { return .skip }   // Esc, whatever is held with it
+        if returnKeyCodes.contains(keyCode) { return .done }
+        // Command and nothing else that a person chose to hold: ⌘⌥S belongs to
+        // whatever the user has bound it to, not to us. Caps lock isn't one of
+        // those choices, so it isn't allowed to break the shortcut.
+        guard flags.intersection([.command, .shift, .option, .control]) == .command else { return nil }
+        switch chars?.lowercased() {
+        case "s": return .skip
+        case "5": return .snooze
+        case "d": return .done
+        default: return nil
+        }
+    }
+
+    static func action(for event: NSEvent) -> BreakKey? {
+        action(keyCode: event.keyCode, chars: event.charactersIgnoringModifiers, flags: event.modifierFlags)
+    }
+}
+
 /// View-model for one break window. The controller ticks `remaining` down; the
 /// view just renders it.
 final class BreakVM: ObservableObject {
@@ -79,12 +109,17 @@ private struct BreakView: View {
                 .font(.system(size: 46, weight: .light, design: .rounded))
                 .monospacedDigit()
                 .padding(.top, 4)
+            // The shortcut sits in the label rather than in a legend under the
+            // buttons: one glance, full size, nothing greyed out. The keys
+            // themselves are handled by the key monitor, not by SwiftUI, so they
+            // work wherever focus happens to be; the two modifiers below are kept
+            // only for what they draw — the default button's highlight.
             HStack(spacing: 12) {
-                Button("Skip") { vm.onSkip() }
-                    .keyboardShortcut(.cancelAction)      // Esc
-                Button("+5 min") { vm.onSnooze() }
-                Button(vm.kind.doneLabel) { vm.onDone() }
-                    .keyboardShortcut(.defaultAction)     // Return — already did it, credit the break
+                Button("Skip  ⌘S") { vm.onSkip() }
+                    .keyboardShortcut(.cancelAction)      // draws it as the escape button
+                Button("+5 min  ⌘5") { vm.onSnooze() }
+                Button("\(vm.kind.doneLabel)  ⌘D") { vm.onDone() }
+                    .keyboardShortcut(.defaultAction)     // draws it as the default button
             }
             .controlSize(.large)
             .padding(.top, 6)
@@ -105,7 +140,8 @@ private final class BreakWindow: NSWindow {
 }
 
 /// Shows exactly one break window at a time. The window is always dismissible
-/// (Skip button, Esc, or a local key monitor as a hard fallback) and always
+/// (the buttons, Esc, ⌘S, or a click off the card — the keys read by a monitor,
+/// so they don't depend on focus) and always
 /// auto-closes when the countdown ends, so it can never trap the user. It also
 /// bows out if a call starts while it's up.
 final class OverlayController {
@@ -113,7 +149,7 @@ final class OverlayController {
     private var vm: BreakVM?
     private var countdown: Timer?
     private var watchdog: Timer?
-    private var escMonitor: Any?
+    private var keyMonitor: Any?
     private var currentKind: BreakKind?
     private var startedAt: Date?
     private var durationSec = 0
@@ -154,10 +190,17 @@ final class OverlayController {
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
 
-        // Hard fallback so Esc always works regardless of SwiftUI focus.
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { self?.dismiss(.skipped); return nil }   // 53 == Esc
-            return event
+        // Every shortcut goes through the monitor, so none of them depend on
+        // SwiftUI focus landing where we hoped. Consuming the event also stops a
+        // button's own shortcut firing the same action a second time.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let action = BreakKey.action(for: event) else { return event }
+            switch action {
+            case .skip:   self?.dismiss(.skipped)
+            case .snooze: self?.dismiss(.snoozed)
+            case .done:   self?.dismiss(.completed)
+            }
+            return nil
         }
 
         let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.step() }
@@ -198,7 +241,7 @@ final class OverlayController {
         isShowing = false
         countdown?.invalidate(); countdown = nil
         watchdog?.invalidate(); watchdog = nil
-        if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         // Gentle "done" chime so you know the break ended with your eyes closed
         // or mid-stretch. Only on a natural finish, not a skip.
         if reason == .completed, Settings.endChime { NSSound(named: "Glass")?.play() }

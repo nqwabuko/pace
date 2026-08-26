@@ -110,6 +110,27 @@ enum SelfTest {
               "away=\(slept.awaySec)s remaining=\(slept.remaining)s of 1080s",
               slept.awaySec >= 60 * 60 && abs(slept.remaining - 18 * 60) <= 2)
 
+        print("\nkeyboard — every button on the card must have a key, and no key may act alone")
+        func key(_ chars: String?, _ flags: NSEvent.ModifierFlags = .command, code: UInt16 = 0) -> BreakKey? {
+            BreakKey.action(keyCode: code, chars: chars, flags: flags)
+        }
+        check("⌘S skips", "", key("s") == .skip)
+        check("⌘5 buys five more minutes", "", key("5") == .snooze)
+        check("⌘D says you already did it", "", key("d") == .done)
+        check("Esc still skips, with or without ⌘", "",
+              key(nil, [], code: BreakKey.escKeyCode) == .skip
+              && key(nil, .command, code: BreakKey.escKeyCode) == .skip)
+        check("Return still credits it, from either Enter key", "",
+              BreakKey.returnKeyCodes.allSatisfy { key(nil, [], code: $0) == .done })
+        // Typing into whatever is behind a full-screen card is not something a
+        // break should be able to catch, and a combo the user has bound elsewhere
+        // is not ours to take.
+        check("a bare letter is not a shortcut", "", key("s", []) == nil && key("d", []) == nil)
+        check("⌘ plus another modifier is left alone", "",
+              key("s", [.command, .option]) == nil && key("d", [.command, .shift]) == nil)
+        check("caps lock doesn't break it", "", key("S", [.command, .capsLock]) == .skip)
+        check("⌘Q and friends pass through", "", key("q") == nil && key("w") == nil)
+
         print("\nvault health — a broken vault must read as broken, then heal")
         var h = Report.VaultHealth()
         let t = Date(timeIntervalSince1970: 1_755_000_000)
