@@ -99,6 +99,14 @@ enum SelfTest {
               "elapsed=\(held.eyeElapsed)s", held.eyeElapsed == 600)
         check("taking the break clears what calls were holding", "\(held.afterTaking)s", held.afterTaking == 0)
 
+        let openNow = openCallStretch()
+        // The afternoon that reads as zero: on calls for an hour, no break closed yet,
+        // so the log knows nothing. The panel has to show it anyway.
+        check("call time still standing against a break shows today, before any break closes",
+              "today=\(openNow.today)s week=\(openNow.week)s", openNow.today == 3600 && openNow.week == 3600)
+        check("and it adds to what the day already closed, never replacing it",
+              "\(openNow.withClosed)s", openNow.withClosed == 3600 + 600)
+
         let callSum = callHeldSummary()
         // 40 minutes on the row that was finally taken. Not the 25 the extension was
         // carrying as well: same stretch of call time, billed once.
@@ -343,6 +351,17 @@ enum SelfTest {
                 sched.step()
             }
         }
+    }
+
+    /// An hour of calls standing against the move break with nothing logged yet, then
+    /// the same with a closed break already on the day.
+    private static func openCallStretch() -> (today: Int, week: Int, withClosed: Int) {
+        let now = Date(timeIntervalSince1970: 1_755_000_000)
+        let closed = [BreakEvent(at: Calendar.current.startOfDay(for: now).addingTimeInterval(9 * 3600),
+                                 kind: "move", outcome: "completed", seconds: 120, callSec: 600)]
+        let bare = Report.summary(from: [], now: now, openCall: (eye: 0, move: 3600))
+        let both = Report.summary(from: closed, now: now, openCall: (eye: 0, move: 3600))
+        return (bare.callMoveToday, bare.callMoveWeek, both.callMoveToday)
     }
 
     /// The overnight log flood, reproduced: half an hour at the desk, then a night

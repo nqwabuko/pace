@@ -439,7 +439,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // MARK: stats + feedback windows
 
     @objc private func showStats() {
-        let host = NSHostingController(rootView: StatsView(s: Report.summary()))
+        // The open stretch comes from the live loop, not the log: a call holding a
+        // break off right now hasn't been written anywhere yet, and that is exactly
+        // when you'd open this window.
+        let open = (eye: lastStatus?.eye.callHeldSec ?? 0, move: lastStatus?.move.callHeldSec ?? 0)
+        let host = NSHostingController(rootView: StatsView(s: Report.summary(openCall: open)))
         if let w = statsWindow {
             w.contentViewController = host
             w.setContentSize(statsSize)

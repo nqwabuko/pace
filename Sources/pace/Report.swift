@@ -115,14 +115,22 @@ enum Report {
     // MARK: in-app stats
 
     /// Aggregates for the glanceable in-app charts (last `daysBack` days).
-    static func summary(now: Date = Date(), daysBack: Int = 14) -> StatsSummary {
-        summary(from: events(), now: now, daysBack: daysBack)
+    static func summary(now: Date = Date(), daysBack: Int = 14,
+                        openCall: (eye: Int, move: Int) = (0, 0)) -> StatsSummary {
+        summary(from: events(), now: now, daysBack: daysBack, openCall: openCall)
     }
 
     /// The pure half, so the arithmetic can be checked against a handful of made-up
     /// events instead of whatever happens to be on disk. `daysBack` is two weeks
     /// because the debt panel compares the last seven days with the seven before.
-    static func summary(from evs: [BreakEvent], now: Date = Date(), daysBack: Int = 14) -> StatsSummary {
+    /// `openCall` is the call time standing against each break *right now*, from the
+    /// running loop rather than the log. The log only learns what a call cost when a
+    /// break closes and carries the figure, so an afternoon of back-to-back calls
+    /// with no break taken yet reads as zero everywhere — which is precisely the
+    /// afternoon you would want to look at this panel. The two never overlap: the log
+    /// holds the closed stretches, this is the open one, so they add.
+    static func summary(from evs: [BreakEvent], now: Date = Date(), daysBack: Int = 14,
+                        openCall: (eye: Int, move: Int) = (0, 0)) -> StatsSummary {
         let cal = Calendar.current
         let byDay = Dictionary(grouping: evs) { dayKey($0.at) }
 
@@ -136,8 +144,8 @@ enum Report {
                                  move: taken.filter { $0.kind == "move" }.count,
                                  overdueSec: eyeDebtCleared(list),
                                  putOffs: list.filter(isPutOff).count,
-                                 callEyeSec: callHeld(list, kind: "eye"),
-                                 callMoveSec: callHeld(list, kind: "move")))
+                                 callEyeSec: callHeld(list, kind: "eye") + (i == 0 ? openCall.eye : 0),
+                                 callMoveSec: callHeld(list, kind: "move") + (i == 0 ? openCall.move : 0)))
         }
 
         let week = days.suffix(7)
