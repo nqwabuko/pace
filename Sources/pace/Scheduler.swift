@@ -137,7 +137,6 @@ final class Scheduler {
     private var pending: (date: Date, kind: BreakKind)?   // a one-off typed/scheduled break
     private var timer: Timer?
     private var lastWork: Double = 0
-    private var lastWall: Date?
 
     /// The outside world. Replaced wholesale by `--sim`.
     var env = Env()
@@ -149,7 +148,6 @@ final class Scheduler {
     // counts as away). While locked we keep counting but hold the overlay; on
     // unlock we credit a rest only if the lock lasted long enough to be one.
     private var screenLocked = false
-    private var lockedSince: Date?
 
     /// What each track owed the last time there was demonstrably a human here.
     /// The counters deliberately keep climbing while you're away, so that the break
@@ -159,9 +157,9 @@ final class Scheduler {
     /// asleep), because "the debt you walked away with" is the same fact in each.
     private var presentDebt: [Gauge] = []
 
-    /// The idle spell as of the last tick. When input comes back, this is how long
-    /// nobody was there — the sensor that doesn't depend on a notification arriving.
-    private var lastIdle: Double = 0
+    /// When a human was last demonstrably at the machine. The one source for "have
+    /// I been away, and for how long".
+    private var lastPresence: Date?
 
     // Per-tick snapshot, used only to build the UI status.
     private var stMeeting = false
@@ -231,7 +229,6 @@ final class Scheduler {
 
     func start() {
         lastWork = env.work()
-        lastWall = env.wall()
         presentDebt = currentGauges()
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
@@ -255,26 +252,17 @@ final class Scheduler {
     var isPaused: Bool { pausedUntil.map { $0 > env.wall() } ?? false }
     func resume() { pausedUntil = nil; tick() }
 
-    /// Screen lock / unlock (from the workspace notifications). Locking marks you
-    /// away; unlocking after a long enough lock is a real rest, so it credits one.
+    /// Screen lock / unlock (from the workspace notifications). Locking holds the
+    /// overlay back: a break has nobody to show itself to on a lock screen.
+    ///
+    /// It no longer credits the rest the lock earned, and doesn't need to. Unlocking
+    /// takes a password or a touch, so the presence clock in `tick` sees a human
+    /// arrive and credits the whole absence — from the same field, by the same rule
+    /// as every other way of coming back. A lock is one way to be away, not a second
+    /// kind of away needing its own arithmetic.
     func setScreenLocked(_ locked: Bool) {
-        if locked {
-            screenLocked = true
-            lockedSince = env.wall()
-        } else {
-            unlock()
-        }
+        screenLocked = locked
         tick()
-    }
-
-    /// The unlock half, without the re-tick, so the missed-notification watchdog
-    /// in `tick` can reuse it without recursing.
-    private func unlock() {
-        if let since = lockedSince {
-            creditAway(seconds: Int(env.wall().timeIntervalSince(since)))
-        }
-        screenLocked = false
-        lockedSince = nil
     }
 
     /// Something that isn't a break rested you: a long enough lock, a long enough
@@ -357,15 +345,11 @@ final class Scheduler {
     /// timer is only a nudge to look at the clock, never the clock itself: if the
     /// run loop is starved (App Nap, a slow write) the next tick still counts every
     /// second that passed, so the loop heals instead of silently losing time.
-    private func elapsedSinceLastTick() -> (work: Double, wall: Double) {
+    private func elapsedSinceLastTick() -> Double {
         let now = env.work()
         let work = max(0, now - lastWork)
         lastWork = now
-
-        let wallNow = env.wall()
-        let wall = lastWall.map { max(0, wallNow.timeIntervalSince($0)) } ?? work
-        lastWall = wallNow
-        return (work, wall)
+        return work
     }
 
     /// Advance the loop one step, reading the injected clock. `start()`'s timer
@@ -375,31 +359,41 @@ final class Scheduler {
 
     private func tick() {
         let now = env.wall()
-        let (delta, wallDelta) = elapsedSinceLastTick()
+        let delta = elapsedSinceLastTick()
         let idle = env.idleSec()
         stMeeting = false
         stAway = false
-        defer { emit(); lastIdle = idle }
+        defer { emit() }
 
-        if Settings.idleAware {
-            // The machine was asleep, or this process was starved, for the gap
-            // between the two clocks: wall time that was not screen work. A clock
-            // can't drop a notification, which is why this is the backstop.
-            creditAway(seconds: Int(wallDelta - delta))
+        // Is a human demonstrably here, this second? Input in the last couple of
+        // seconds is the only evidence of that the machine offers. Everything about
+        // absence hangs off this one reading.
+        let present = idle < 2
 
-            // Input came back after a long spell of none. This is the case that ran
-            // all night: a Mac held awake and unlocked by something else (audio
-            // assertions, in the event that found it), pace counting screen work and
-            // firing breaks into an empty room, each one auto-completing as a rest
-            // nobody took. A screen that never locks is not a human who never left.
-            if idle < lastIdle { creditAway(seconds: Int(lastIdle)) }
+        // An absence ends when a human comes back, and only then. Its length is wall
+        // time since one was last here, which needs no reconciliation of the work and
+        // wall clocks to measure: sleep, dark wakes, a starved run loop and an empty
+        // chair all read the same, because none of them are a person.
+        //
+        // This used to be three separate detectors — a wall-vs-work gap, a drop in
+        // the idle counter, and the lock's own duration — each firing on its own. The
+        // first of them read the machine *waking* as you *returning*, so a night of
+        // macOS dark wakes (roughly one every fifteen minutes) logged a fresh rest at
+        // every one: forty pairs a night, 1,188 of them in a fortnight. A machine
+        // waking itself is not news about a human, and now nothing treats it as if it
+        // were.
+        if present {
+            if Settings.idleAware, let since = lastPresence {
+                creditAway(seconds: Int(now.timeIntervalSince(since)))
+            }
+            lastPresence = now
         }
 
         // Self-heal a missed unlock notification: if we think the screen is
         // locked but there has been human input in the last couple of seconds,
         // we are demonstrably back at the desk. Without this a single dropped
         // notification would wedge the app in "away" forever.
-        if screenLocked, idle < 2 { unlock() }
+        if screenLocked, present { screenLocked = false }
 
         if let until = pausedUntil {
             if now < until { return }
@@ -447,8 +441,6 @@ final class Scheduler {
         // is not.
         if screenLocked || idle >= Double(Settings.awayResetSec) {
             stAway = true
-            eye.elapsed += delta
-            move.elapsed += delta
             return
         }
 
@@ -469,7 +461,7 @@ final class Scheduler {
         // "this is what was owed while someone was here". Every path above either
         // freezes the counters (paused, on a call, a break on screen) or is the
         // absence itself, so a snapshot that lags one of those is still correct.
-        if idle < 2 { presentDebt = currentGauges() }
+        if present { presentDebt = currentGauges() }
 
         if Settings.moveEnabled, move.isDue(interval: Double(Settings.moveIntervalSec), now: now) {
             fire(.move, onCall: onCall)

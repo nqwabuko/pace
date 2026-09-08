@@ -80,6 +80,14 @@ enum SelfTest {
               "eye overdue=\(away.overdue)s put off \(away.refusals)× away=\(away.awaySec)s",
               away.overdue == 4 * 60 && away.refusals == 1 && away.awaySec == 20 * 60)
 
+        print("\nnights — one absence is one rest, however often the machine wakes itself")
+        let dark = nightOfDarkWakes()
+        check("a night of dark wakes credits one rest, not one per wake",
+              "\(dark.rests) rests logged", dark.rests == 1)
+        check("and the one it credits is the whole night", "\(dark.longest)s", dark.longest >= 10 * 3600)
+        check("nothing accrues as screen work while nobody is there",
+              "elapsed=\(dark.elapsedAtDawn)s", dark.elapsedAtDawn == 0)
+
         print("\ncalls — a call that stops you moving must show up as time, not nothing")
         let held = callHeldThroughAnHourOnACall()
         // The whole point of counting this above the holding return. In holding mode
@@ -319,6 +327,14 @@ enum SelfTest {
                             idleSec: { [unowned self] in self.idle })
         }
 
+        /// The machine asleep. Wall time passes, the monotonic work clock does not,
+        /// and no tick runs — which is what a night of sleep and dark wakes actually
+        /// looks like from inside the loop.
+        func asleep(_ seconds: Int) {
+            wall += TimeInterval(seconds)
+            idle += Double(seconds)
+        }
+
         func run(_ seconds: Int, untouched: Bool = false) {
             for _ in 0..<seconds {
                 work += 1
@@ -327,6 +343,43 @@ enum SelfTest {
                 sched.step()
             }
         }
+    }
+
+    /// The overnight log flood, reproduced: half an hour at the desk, then a night
+    /// of the machine sleeping in fifteen-minute chunks and waking itself for forty
+    /// seconds at a time. macOS dark-wake cadence, and nobody there for any of it.
+    /// Every one of those wakes used to be read as "you came back, rested", so a
+    /// single night wrote forty pairs of rest events.
+    private static func nightOfDarkWakes() -> (rests: Int, longest: Int, elapsedAtDawn: Int) {
+        var out = (rests: 0, longest: 0, elapsedAtDawn: -1)
+        withScratchSettings {
+            Settings.set(.eyeIntervalMin, 20)
+            Settings.set(.moveEnabled, false)
+            Settings.set(.awayResetMin, 15)
+
+            let rig = Rig()
+            var last: Scheduler.Status?
+            rig.sched.onTick = { last = $0 }
+            rig.sched.onBreakDue = { _, _ in rig.sched.overlayShowing = true }
+            rig.sched.onAwayRest = { _, secs in
+                out.rests += 1
+                out.longest = max(out.longest, secs)
+            }
+            rig.sched.start()
+
+            rig.run(30 * 60)                        // half an hour at the desk
+            rig.sched.overlayShowing = false
+            rig.sched.breakFinished(.eye, .completed)
+
+            for _ in 0..<40 {                       // ten hours of sleep and dark wakes
+                rig.asleep(15 * 60)
+                rig.run(40, untouched: true)
+            }
+            out.elapsedAtDawn = Int(Double(Settings.eyeIntervalSec) - Double(last?.eye.remaining ?? 0))
+
+            rig.run(2)                              // morning: a keypress
+        }
+        return out
     }
 
     /// An hour on a call in the default holding mode, from ten minutes of desk work.
