@@ -442,18 +442,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let host = NSHostingController(rootView: StatsView(s: Report.summary()))
         if let w = statsWindow {
             w.contentViewController = host
+            w.setContentSize(statsSize)
         } else {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 720),
-                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            // Resizable, because the report grows: a panel added to the view must not
+            // be a panel you can only reach by scrolling a window you can't enlarge.
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: statsSize),
+                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             w.title = "pace stats"
             w.isReleasedWhenClosed = false
             w.contentViewController = host
+            w.setContentSize(statsSize)
             w.center()
             statsWindow = w
         }
         NSApp.activate(ignoringOtherApps: true)
         statsWindow?.makeKeyAndOrderFront(nil)
     }
+
+    /// The stats window's size, and the `setContentSize` calls above that impose it.
+    ///
+    /// Assigning a `contentViewController` makes the window adopt that controller's
+    /// `preferredContentSize`, and a hosting controller whose root view scrolls
+    /// reports that as **zero** — a scroll view has no height of its own to offer.
+    /// So the window opened at 420×32: a title bar with nothing under it, no way to
+    /// resize it and no way to know why. The window owns its own size here, and the
+    /// scroll view gets whatever is left, which is the right way round.
+    ///
+    /// Only this window scrolls, so only this one collapsed; the feedback window's
+    /// view has a real intrinsic height and sizes itself correctly.
+    private var statsSize: NSSize { NSSize(width: 460, height: 720) }
 
     @objc private func showFeedback() {
         let view = FeedbackView(

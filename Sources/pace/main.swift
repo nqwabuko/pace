@@ -61,7 +61,10 @@ if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     // Height is optional so the whole scroll (now that "Held by calls" has been
     // added below the fold) can be captured in one shot for review.
     let h = i + 2 < args.count ? (Int(args[i + 2]) ?? 900) : 900
-    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: Report.sampleEvents()), height: h)
+    // `--real` renders the actual log instead, which is how you reproduce a stats
+    // window that looks wrong on this machine without opening it over the desktop.
+    let evs = args.contains("--real") ? Report.events() : Report.sampleEvents()
+    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: evs), height: h)
     print(ok ? "wrote \(args[i + 1])" : "failed to render")
     exit(ok ? 0 : 1)
 }
