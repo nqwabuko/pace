@@ -52,7 +52,8 @@ enum Deferral {
     static let snoozeSec: TimeInterval = 5 * 60      // "+5 min" means five minutes
     static let skipSec: TimeInterval = 10 * 60       // "Skip" buys longer quiet
     static let interruptSec: TimeInterval = 2 * 60   // a call cut it short: try again soon
-    static let nudgeSec: TimeInterval = 5 * 60       // gap between on-call nudges
+    static let nudgeSec: TimeInterval = 5 * 60       // first gap between on-call nudges
+    static let nudgeCapSec: TimeInterval = 30 * 60   // and the longest it backs off to
 }
 
 /// The outside world the loop reads: two clocks and two sensors. Injected so the
@@ -91,15 +92,25 @@ final class Scheduler {
         var deferUntil: Date?       // put off: quiet until then, debt still climbing
         var refusals = 0            // times put off since the last real rest
         var lastNudge: Date?        // last on-call nudge; its own gap, not the break's
+        var nudges = 0              // nudges since the last real rest; each buys longer quiet
 
-        mutating func rested() { elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil }
+        mutating func rested() { elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil; nudges = 0 }
 
         /// A nudge has its own quiet gap so a long call doesn't buzz every second.
         /// Deliberately separate from `deferUntil`: the break is still owed, so
         /// when the call ends it comes up at once rather than waiting out a gap it
         /// never asked for.
+        ///
+        /// The gap doubles with each nudge, up to a cap. A break can't be rested
+        /// during a call, so the condition that fired the first nudge is still true
+        /// for every one after it — a fixed gap would repeat the same unactionable
+        /// banner every five minutes for the length of the call. The first nudge is
+        /// the one worth having, so it still lands on time; the tenth is not, so it
+        /// doesn't come. Nothing here resets on call end: `deferUntil` was never
+        /// touched, so the overlay fires as soon as the call drops and rests it.
         func canNudge(now: Date) -> Bool {
-            lastNudge.map { now.timeIntervalSince($0) >= Deferral.nudgeSec } ?? true
+            let gap = min(Deferral.nudgeSec * pow(2, Double(nudges)), Deferral.nudgeCapSec)
+            return lastNudge.map { now.timeIntervalSince($0) >= gap } ?? true
         }
 
         mutating func put(off seconds: TimeInterval, now: Date, refusal: Bool) {
@@ -459,6 +470,7 @@ final class Scheduler {
         withTrack(kind) {
             guard $0.canNudge(now: now) else { return }
             $0.lastNudge = now
+            $0.nudges += 1
             nudge = true
         }
         if nudge { onCallNudge?(kind) }
