@@ -93,8 +93,11 @@ final class Scheduler {
         var refusals = 0            // times put off since the last real rest
         var lastNudge: Date?        // last on-call nudge; its own gap, not the break's
         var nudges = 0              // nudges since the last real rest; each buys longer quiet
+        var callHeld: Double = 0    // seconds on a call since the last real rest
 
-        mutating func rested() { elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil; nudges = 0 }
+        mutating func rested() {
+            elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil; nudges = 0; callHeld = 0
+        }
 
         /// A nudge has its own quiet gap so a long call doesn't buzz every second.
         /// Deliberately separate from `deferUntil`: the break is still owed, so
@@ -185,6 +188,7 @@ final class Scheduler {
         var overdue: Int      // seconds past due; 0 until then
         var strain: Double    // elapsed / interval, uncapped: above 1 means overdue
         var refusals: Int     // times put off since the last real rest
+        var callHeldSec: Int  // of the time since the last rest, how much was on a call
 
         var name: String { kind.shortName }
     }
@@ -408,6 +412,20 @@ final class Scheduler {
         let onCall = Settings.meetingAware && env.inCall()
         if onCall {
             stMeeting = true
+
+            // How long a call has kept you from each break. Counted here, above the
+            // holding `return`, because it has to mean the same thing in both call
+            // modes: holding freezes `elapsed`, so the debt itself stops growing and
+            // would report a two-hour call as costing nothing. This is wall time on a
+            // call since the last real rest, which is the question actually being
+            // asked — "how long did calls stop me moving" — and it survives the freeze.
+            //
+            // Both tracks accrue it, and the two are never added together: a minute
+            // on a call holds off your eyes and your legs at the same time, so the
+            // sum would count that minute twice and stop being a quantity of time.
+            eye.callHeld += delta
+            move.callHeld += delta
+
             if overlayShowing { onMeetingDuringBreak?() }   // never cover a call
             if !Settings.callBreaks { return }
         }
@@ -496,7 +514,7 @@ final class Scheduler {
 
     private func gauge(_ kind: BreakKind, _ t: Track, enabled: Bool, interval: Double) -> Gauge {
         guard enabled else {
-            return Gauge(kind: kind, enabled: false, remaining: 0, overdue: 0, strain: 0, refusals: 0)
+            return Gauge(kind: kind, enabled: false, remaining: 0, overdue: 0, strain: 0, refusals: 0, callHeldSec: 0)
         }
         return Gauge(
             kind: kind,
@@ -504,6 +522,7 @@ final class Scheduler {
             remaining: Int(max(0, interval - t.elapsed)),
             overdue: Int(max(0, t.elapsed - interval)),
             strain: t.strain(interval: interval),
-            refusals: t.refusals)
+            refusals: t.refusals,
+            callHeldSec: Int(t.callHeld))
     }
 }

@@ -67,14 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             self.scheduler.breakFinished(kind, reason)
             Report.log(kind: kind.label, outcome: reason.logName,
                        seconds: reason == .completed ? kind.durationSec : 0,
-                       overdueSec: owed?.overdue, refusals: owed?.refusals)
+                       overdueSec: owed?.overdue, refusals: owed?.refusals,
+                       callSec: owed?.callHeldSec)
             let vault = Settings.vaultPath
             if !vault.isEmpty { Report.updateVault(vault) }
         }
         scheduler.onAwayRest = { credits, awaySec in
             for g in credits {
                 Report.log(kind: g.kind.label, outcome: "rested", seconds: awaySec,
-                           overdueSec: g.overdue, refusals: g.refusals)
+                           overdueSec: g.overdue, refusals: g.refusals,
+                           callSec: g.callHeldSec)
             }
             if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
         }
@@ -357,7 +359,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         nudgeUntil = Date().addingTimeInterval(30)
         let owed = lastStatus?.gauge(kind)
         Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
-                   overdueSec: owed?.overdue, refusals: owed?.refusals)
+                   overdueSec: owed?.overdue, refusals: owed?.refusals,
+                   callSec: owed?.callHeldSec)
         if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
 
         guard notificationsAvailable else { return }

@@ -22,14 +22,25 @@ struct BreakEvent: Codable {
     let overdueSec: Int?
     let refusals: Int?
 
+    /// Of the stretch since this break was last rested, how much of it you spent on
+    /// a call. Recorded on the row that *ends* the stretch, for the same reason
+    /// `overdueSec` is: a break put off four times then taken contributes its call
+    /// time once, not five times. `nudged` rows carry the running figure too, so a
+    /// long call can be read mid-flight, but the day totals only count the rows that
+    /// closed a debt.
+    ///
+    /// Optional for the same non-negotiable reason as the two above.
+    let callSec: Int?
+
     init(at: Date, kind: String, outcome: String, seconds: Int,
-         overdueSec: Int? = nil, refusals: Int? = nil) {
+         overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil) {
         self.at = at
         self.kind = kind
         self.outcome = outcome
         self.seconds = seconds
         self.overdueSec = overdueSec
         self.refusals = refusals
+        self.callSec = callSec
     }
 }
 
@@ -80,9 +91,10 @@ enum Report {
     // MARK: log (always, source of truth)
 
     static func log(kind: String, outcome: String, seconds: Int,
-                    overdueSec: Int? = nil, refusals: Int? = nil, now: Date = Date()) {
+                    overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil,
+                    now: Date = Date()) {
         let ev = BreakEvent(at: now, kind: kind, outcome: outcome, seconds: seconds,
-                            overdueSec: overdueSec, refusals: refusals)
+                            overdueSec: overdueSec, refusals: refusals, callSec: callSec)
         guard let data = try? enc.encode(ev), let line = String(data: data, encoding: .utf8) else { return }
         io.async {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -123,7 +135,9 @@ enum Report {
                                  eye: taken.filter { $0.kind == "eye" }.count,
                                  move: taken.filter { $0.kind == "move" }.count,
                                  overdueSec: eyeDebtCleared(list),
-                                 putOffs: list.filter(isPutOff).count))
+                                 putOffs: list.filter(isPutOff).count,
+                                 callEyeSec: callHeld(list, kind: "eye"),
+                                 callMoveSec: callHeld(list, kind: "move")))
         }
 
         let week = days.suffix(7)
@@ -152,6 +166,11 @@ enum Report {
                             putOffsWeek: week.reduce(0) { $0 + $1.putOffs },
                             overduePrevWeek: prevWeek.reduce(0) { $0 + $1.overdueSec },
                             putOffsPrevWeek: prevWeek.reduce(0) { $0 + $1.putOffs },
+                            callEyeToday: days.last?.callEyeSec ?? 0,
+                            callMoveToday: days.last?.callMoveSec ?? 0,
+                            callEyeWeek: week.reduce(0) { $0 + $1.callEyeSec },
+                            callMoveWeek: week.reduce(0) { $0 + $1.callMoveSec },
+                            callDaysWeek: week.filter { $0.callEyeSec > 0 || $0.callMoveSec > 0 }.count,
                             split: takeSplit(evs.filter { $0.at >= cutoff7 }))
     }
 
@@ -169,6 +188,18 @@ enum Report {
     private static func eyeDebtCleared(_ list: [BreakEvent]) -> Int {
         list.filter { $0.kind == "eye" && ($0.outcome == "completed" || $0.outcome == "rested") }
             .reduce(0) { $0 + ($1.overdueSec ?? 0) }
+    }
+
+    /// How long calls held one break kind off, over a set of events: summed from the
+    /// rows that closed a debt, so an extended break counts its call time once.
+    ///
+    /// Per kind and never summed across kinds, unlike `eyeDebtCleared`, which reports
+    /// eye only. It can afford to: "calls held your eyes off for 40 minutes" and
+    /// "calls held you in your chair for 40 minutes" are two readings of the same
+    /// forty minutes, and both are worth saying as long as nothing adds them.
+    static func callHeld(_ list: [BreakEvent], kind: String) -> Int {
+        list.filter { $0.kind == kind && ($0.outcome == "completed" || $0.outcome == "rested") }
+            .reduce(0) { $0 + ($1.callSec ?? 0) }
     }
 
     /// Chose to put it off. A call cutting a break short doesn't count, and neither
@@ -240,10 +271,16 @@ enum Report {
                     evs.append(BreakEvent(at: at.addingTimeInterval(Double(r * 300)), kind: "eye", outcome: "snoozed",
                                           seconds: 0, overdueSec: r * 300, refusals: r))
                 }
+                // Every other day is call-heavy, and the eye break that lands mid-morning
+                // is the one that carries the call time on those days.
+                let onCall = (d % 2 == 0 && e == 2) ? (20 + d % 4 * 10) * 60 : 0
                 evs.append(BreakEvent(at: at.addingTimeInterval(Double(puts * 300)), kind: "eye", outcome: "completed",
-                                      seconds: 30, overdueSec: puts * 300, refusals: puts))
+                                      seconds: 30, overdueSec: puts * 300, refusals: puts, callSec: onCall))
             }
-            for m in 0..<(1 + d % 3) { evs.append(BreakEvent(at: base.addingTimeInterval(Double(10 * 3600 + m * 3000)), kind: "move", outcome: "completed", seconds: 120, overdueSec: 0, refusals: 0)) }
+            for m in 0..<(1 + d % 3) {
+                let onCall = (d % 2 == 0 && m == 0) ? (35 + d % 4 * 10) * 60 : 0
+                evs.append(BreakEvent(at: base.addingTimeInterval(Double(10 * 3600 + m * 3000)), kind: "move", outcome: "completed", seconds: 120, overdueSec: 0, refusals: 0, callSec: onCall))
+            }
             if d % 2 == 0 { evs.append(BreakEvent(at: base.addingTimeInterval(11 * 3600), kind: "eye", outcome: "skipped", seconds: 0, overdueSec: 0, refusals: 0)) }
             if d % 5 == 0 {
                 for k in ["eye", "move"] { evs.append(BreakEvent(at: base.addingTimeInterval(13 * 3600), kind: k, outcome: "rested", seconds: 2700, overdueSec: 600, refusals: 1)) }
@@ -287,6 +324,8 @@ enum Report {
         let awayRests = list.filter { $0.outcome == "rested" && $0.kind == "eye" }.count
         let minutes = list.filter { $0.outcome == "completed" }.reduce(0) { $0 + $1.seconds } / 60
         let overdueMin = eyeDebtCleared(list) / 60
+        let callEyeMin = callHeld(list, kind: "eye") / 60
+        let callMoveMin = callHeld(list, kind: "move") / 60
 
         var s = """
         ---
@@ -298,20 +337,24 @@ enum Report {
         pace_away_rests: \(awayRests)
         pace_eye_overdue_min: \(overdueMin)
         pace_break_minutes: \(minutes)
+        pace_call_held_eye_min: \(callEyeMin)
+        pace_call_held_move_min: \(callMoveMin)
         ---
         # pace · \(day)
 
         \(eye) eye · \(move) move · \(skipped) skipped · \(minutes) min resting
         Put off \(putOff)× · \(overdueMin) min of eye time past due
+        Held by calls: \(callEyeMin) min without an eye rest · \(callMoveMin) min without moving
 
-        | time | break | outcome | overdue | put off before |
-        |------|-------|---------|---------|----------------|
+        | time | break | outcome | overdue | put off before | on a call |
+        |------|-------|---------|---------|----------------|-----------|
 
         """
         for e in list.sorted(by: { $0.at < $1.at }) {
             let over = e.overdueSec.map { "\($0 / 60)m \($0 % 60)s" } ?? "–"
             let put = e.refusals.map(String.init) ?? "–"
-            s += "| \(clockHM(e.at)) | \(e.kind) | \(e.outcome) | \(over) | \(put) |\n"
+            let call = e.callSec.map { "\($0 / 60)m" } ?? "–"
+            s += "| \(clockHM(e.at)) | \(e.kind) | \(e.outcome) | \(over) | \(put) | \(call) |\n"
         }
         return s
     }
@@ -332,8 +375,9 @@ enum Report {
             let overdueMin = eyeDebtCleared(win) / 60
             let split = takeSplit(win)
             let firstTime = split.total > 0 ? "\(split.firstPct)% first time" : "no first-time data yet"
-            return String(format: "%.1f taken/day · %.0f min/day resting · %.1f put off/day · %d min past due · %@",
-                          perDay, minPerDay, Double(putOff) / Double(days), overdueMin, firstTime)
+            return String(format: "%.1f taken/day · %.0f min/day resting · %.1f put off/day · %d min past due · %@\n  - *Held by calls:* %d min without an eye rest, %d min without moving",
+                          perDay, minPerDay, Double(putOff) / Double(days), overdueMin, firstTime,
+                          callHeld(win, kind: "eye") / 60, callHeld(win, kind: "move") / 60)
         }
 
         // Current streak: consecutive days up to today with ≥1 completed break.

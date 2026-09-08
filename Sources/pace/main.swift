@@ -58,7 +58,10 @@ if let i = args.firstIndex(of: "--report-demo"), i + 1 < args.count {
 // the reporting can be reviewed without opening a window over your work.
 if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     Settings.registerDefaults()
-    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: Report.sampleEvents()))
+    // Height is optional so the whole scroll (now that "Held by calls" has been
+    // added below the fold) can be captured in one shot for review.
+    let h = i + 2 < args.count ? (Int(args[i + 2]) ?? 900) : 900
+    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: Report.sampleEvents()), height: h)
     print(ok ? "wrote \(args[i + 1])" : "failed to render")
     exit(ok ? 0 : 1)
 }

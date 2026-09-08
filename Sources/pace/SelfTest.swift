@@ -58,9 +58,9 @@ enum SelfTest {
 
         print("\ndebt — extensions and the time they cost must both survive the log")
         let legacy = decodeLegacyLine()
-        check("a line written before overdue/refusals existed still decodes",
-              legacy.map { "\($0.outcome) overdue=\(String(describing: $0.overdueSec))" } ?? "dropped",
-              legacy != nil && legacy?.overdueSec == nil && legacy?.refusals == nil)
+        check("a line written before overdue/refusals/call time existed still decodes",
+              legacy.map { "\($0.outcome) overdue=\(String(describing: $0.overdueSec)) call=\(String(describing: $0.callSec))" } ?? "dropped",
+              legacy != nil && legacy?.overdueSec == nil && legacy?.refusals == nil && legacy?.callSec == nil)
 
         let d = debtSummary()
         // 10 overdue minutes on the break that was finally taken, 15 on the debt the
@@ -79,6 +79,27 @@ enum SelfTest {
         check("a long spell away records the debt you walked away with, not the time away",
               "eye overdue=\(away.overdue)s put off \(away.refusals)× away=\(away.awaySec)s",
               away.overdue == 4 * 60 && away.refusals == 1 && away.awaySec == 20 * 60)
+
+        print("\ncalls — a call that stops you moving must show up as time, not nothing")
+        let held = callHeldThroughAnHourOnACall()
+        // The whole point of counting this above the holding return. In holding mode
+        // `elapsed` is frozen for the hour, so every debt reading says the call cost
+        // nothing; the call clock is the only thing that can say otherwise.
+        check("an hour on a call is an hour held off both breaks",
+              "eye=\(held.eye)s move=\(held.move)s", held.eye == 3600 && held.move == 3600)
+        check("and the frozen debt still reports nothing, which is why this exists",
+              "elapsed=\(held.eyeElapsed)s", held.eyeElapsed == 600)
+        check("taking the break clears what calls were holding", "\(held.afterTaking)s", held.afterTaking == 0)
+
+        let callSum = callHeldSummary()
+        // 40 minutes on the row that was finally taken. Not the 25 the extension was
+        // carrying as well: same stretch of call time, billed once.
+        check("call time counts the event that cleared the debt, once",
+              "eye=\(callSum.eye)s", callSum.eye == 40 * 60)
+        check("eye and move are reported apart, never summed",
+              "eye=\(callSum.eye)s move=\(callSum.move)s", callSum.move == 50 * 60)
+        check("a row written before call time existed claims none",
+              "\(callSum.legacy)s", callSum.legacy == 0)
 
         print("\nabsence — a screen that never locks is not a human who never left")
         let night = overnightUntouched()
@@ -289,11 +310,12 @@ enum SelfTest {
         var work = 30_000.0
         var wall = Date(timeIntervalSince1970: 1_755_000_000)
         var idle = 0.0
+        var onCall = false
 
         init() {
             sched.env = Env(work: { [unowned self] in self.work },
                             wall: { [unowned self] in self.wall },
-                            inCall: { false },
+                            inCall: { [unowned self] in self.onCall },
                             idleSec: { [unowned self] in self.idle })
         }
 
@@ -305,6 +327,58 @@ enum SelfTest {
                 sched.step()
             }
         }
+    }
+
+    /// An hour on a call in the default holding mode, from ten minutes of desk work.
+    /// Holding freezes the counters, so this is the case where every existing number
+    /// says the call was free.
+    private static func callHeldThroughAnHourOnACall()
+        -> (eye: Int, move: Int, eyeElapsed: Int, afterTaking: Int) {
+        var out = (eye: -1, move: -1, eyeElapsed: -1, afterTaking: -1)
+        withScratchSettings {
+            Settings.set(.eyeIntervalMin, 20)
+            Settings.set(.moveIntervalMin, 30)
+            Settings.set(.callBreaks, false)      // hold, don't nudge: the harder case
+
+            let rig = Rig()
+            var last: Scheduler.Status?
+            rig.sched.onTick = { last = $0 }
+            rig.sched.onBreakDue = { _, _ in rig.sched.overlayShowing = true }
+            rig.sched.start()
+
+            rig.run(10 * 60)                      // ten minutes at the desk
+            rig.onCall = true
+            rig.run(60 * 60)                      // an hour on a call
+            rig.onCall = false
+
+            out.eye = last?.eye.callHeldSec ?? -1
+            out.move = last?.move.callHeldSec ?? -1
+            // 20-minute eye interval, 10 minutes worked, so 10 min of debt, frozen
+            // there for the whole call rather than the 70 minutes wall time.
+            out.eyeElapsed = Int(Double(Settings.eyeIntervalSec) - Double(last?.eye.remaining ?? 0))
+
+            rig.sched.overlayShowing = false
+            rig.sched.breakFinished(.eye, .completed)
+            rig.run(1)
+            out.afterTaking = last?.eye.callHeldSec ?? -1
+        }
+        return out
+    }
+
+    /// The aggregation, against made-up rows: an eye break nudged twice through a
+    /// call then taken, a move break taken, and a legacy row with no call field.
+    private static func callHeldSummary() -> (eye: Int, move: Int, legacy: Int) {
+        let t = Date(timeIntervalSince1970: 1_755_000_000)
+        let evs: [BreakEvent] = [
+            BreakEvent(at: t, kind: "eye", outcome: "nudged", seconds: 0, callSec: 10 * 60),
+            BreakEvent(at: t + 900, kind: "eye", outcome: "nudged", seconds: 0, callSec: 25 * 60),
+            BreakEvent(at: t + 2400, kind: "eye", outcome: "completed", seconds: 30, callSec: 40 * 60),
+            BreakEvent(at: t + 2500, kind: "move", outcome: "completed", seconds: 120, callSec: 50 * 60),
+        ]
+        let legacy = [BreakEvent(at: t, kind: "eye", outcome: "completed", seconds: 30)]
+        return (Report.callHeld(evs, kind: "eye"),
+                Report.callHeld(evs, kind: "move"),
+                Report.callHeld(legacy, kind: "eye"))
     }
 
     /// Run `body` against a throwaway settings domain, so a check can set an

@@ -9,8 +9,12 @@ struct DayCount: Identifiable {
     let move: Int
     let overdueSec: Int   // eye time worked past due, from the breaks that cleared it
     let putOffs: Int      // times a break was extended or skipped
+    let callEyeSec: Int   // of the time without an eye rest, how much was on a call
+    let callMoveSec: Int  // ditto for moving. Overlaps callEyeSec in real time: never add them
     var total: Int { eye + move }
     var overdueMin: Int { overdueSec / 60 }
+    var callEyeMin: Int { callEyeSec / 60 }
+    var callMoveMin: Int { callMoveSec / 60 }
 }
 
 /// How many extensions the breaks you took needed before you took them. Rows
@@ -37,6 +41,12 @@ struct StatsSummary {
     let putOffsWeek: Int
     let overduePrevWeek: Int
     let putOffsPrevWeek: Int
+    let callEyeToday: Int
+    let callMoveToday: Int
+    let callEyeWeek: Int
+    let callMoveWeek: Int
+    let callDaysWeek: Int     // days in the last 7 with any call-held time, so the
+                              // average is per call day and not diluted by days off
     let split: TakeSplit
 }
 
@@ -74,6 +84,8 @@ struct StatsView: View {
             .frame(height: 170)
 
             putOffPanel
+
+            callHeldPanel
 
             Text("Eye vs move (30 days)").font(.headline)
             if s.eye30 + s.move30 == 0 {
@@ -136,6 +148,57 @@ struct StatsView: View {
                 }
             }
         }
+    }
+
+    /// What calls cost you. Two bars per day rather than one stacked pair, because
+    /// the two overlap in real time — the same hour on a call is an hour without an
+    /// eye rest *and* an hour in the chair — so stacking them would draw a total that
+    /// doesn't exist. Side by side they read as what they are: two views of the same
+    /// call time, each answering a different question.
+    private var callHeldPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Held by calls").font(.headline)
+
+            if s.callEyeWeek == 0 && s.callMoveWeek == 0 {
+                Text("No calls have held a break off in the last 7 days.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    tile("No eye rest today", mins(s.callEyeToday))
+                    tile("No moving today", mins(s.callMoveToday))
+                }
+
+                Chart(Array(s.days.suffix(7))) { d in
+                    BarMark(x: .value("Day", d.day, unit: .day),
+                            y: .value("On calls (min)", d.callEyeMin))
+                        .foregroundStyle(by: .value("Held off", "Eye rest"))  // same teal/orange as
+
+                        .position(by: .value("Held off", "Eye rest"))
+                    BarMark(x: .value("Day", d.day, unit: .day),
+                            y: .value("On calls (min)", d.callMoveMin))
+                        .foregroundStyle(by: .value("Held off", "Moving"))
+                        .position(by: .value("Held off", "Moving"))
+                }
+                .chartForegroundStyleScale(["Eye rest": eyeColor, "Moving": moveColor])  // everywhere else
+                .chartXAxis { AxisMarks(values: .stride(by: .day)) { AxisValueLabel(format: .dateTime.day().month(.abbreviated)) } }
+                .chartYAxisLabel("min on calls")
+                .frame(height: 150)
+
+                Text(callTrend).font(.callout)
+            }
+        }
+    }
+
+    /// The week's call cost in words, averaged over the days that actually had
+    /// calls. Spreading it over seven would divide a heavy Tuesday by a quiet
+    /// weekend and report a number no day resembled.
+    private var callTrend: String {
+        let base = "Last 7 days: \(mins(s.callEyeWeek)) on calls without an eye rest, "
+            + "\(mins(s.callMoveWeek)) without moving."
+        guard s.callDaysWeek > 0 else { return base }
+        let perDay = s.callMoveWeek / s.callDaysWeek
+        return base + " Across \(s.callDaysWeek) day\(s.callDaysWeek == 1 ? "" : "s") with calls, "
+            + "that's \(mins(perDay)) a day sitting still."
     }
 
     /// This week against the one before, in words. The comparison is the point:
