@@ -19,12 +19,20 @@ if let i = args.firstIndex(of: "--parse") {
     exit(0)
 }
 
-// `--make-menuicon <path> [paused] [dark] [nudge] [strain <0…1>]`: render the
-// menu-bar glyph big for review.
+// `--make-menuicon <path> [paused] [dark] [nudge] [call] [foot] [cracks <0…3>] [strain <0…2>]`:
+// render the menu-bar glyph big for review.
 if let i = args.firstIndex(of: "--make-menuicon") {
     let out = i + 1 < args.count ? args[i + 1] : "menuicon.png"
     let strain = args.firstIndex(of: "strain").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 0
-    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge"), strain: CGFloat(strain)) ? 0 : 1)
+    let cracks = args.firstIndex(of: "cracks").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 0
+    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge"), strain: CGFloat(strain), cracks: cracks, foot: args.contains("foot"), onCall: args.contains("call")) ? 0 : 1)
+}
+
+// `--make-damagestrip <path> [dark]`: render every damage state against every
+// strain as one grid, to judge what still reads at true bar size.
+if let i = args.firstIndex(of: "--make-damagestrip") {
+    let out = i + 1 < args.count ? args[i + 1] : "damagestrip.png"
+    exit(IconMaker.writeDamageStrip(to: out, dark: args.contains("dark")) ? 0 : 1)
 }
 
 // `--make-strainstrip <path> [dark]`: render the pupil-dilation sequence as one

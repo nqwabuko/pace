@@ -14,9 +14,15 @@ enum IconMaker {
     /// `strain` is elapsed / eye interval: 0 just rested, 1 the break is due, and
     /// above 1 overdue — the eye keeps getting worse, so putting a break off over
     /// and over is visible on the bar. Paused adds a bold slash and drops the pupil.
-    static func statusImage(paused: Bool, nudge: Bool = false, strain: CGFloat = 0) -> NSImage {
+    ///
+    /// `cracks` is eye rests missed and `foot` a movement break missed — damage,
+    /// which outlives the call that caused it, because a break put off is still
+    /// owed. `onCall` is the live state that explains why they're accumulating with
+    /// nothing on screen: the breaks are being held.
+    static func statusImage(paused: Bool, nudge: Bool = false, strain: CGFloat = 0,
+                            cracks: Int = 0, foot: Bool = false, onCall: Bool = false) -> NSImage {
         let img = NSImage(size: NSSize(width: glyphW, height: glyphH), flipped: false) { _ in
-            drawEye(paused: paused, nudge: nudge, strain: strain, color: .black)
+            drawEye(paused: paused, nudge: nudge, strain: strain, cracks: cracks, foot: foot, onCall: onCall, color: .black)
             return true
         }
         img.isTemplate = true
@@ -27,7 +33,7 @@ enum IconMaker {
     private static let halfW: CGFloat = 7.3        // rim half-width (unchanged from the old oval)
     private static let restPupilR: CGFloat = 3.0   // just rested: loose, small, sitting low
     private static let strainPupilR: CGFloat = 4.4 // break due: blown, but a ring of white still shows
-    private static let restPupilY: CGFloat = 7.1
+    private static let restPupilFrac: CGFloat = 0.26  // rested pupil sits this far below centre, as a fraction of the rim half-width
 
     // Overdue: what a break that has been put off rather than taken looks like.
     // The rule is that it must get *heavier*, never fainter. A thin hairline reads
@@ -36,6 +42,22 @@ enum IconMaker {
     private static let dueSquint: CGFloat = 0.10      // a hint of a heavy lid in the last stretch
     private static let overdueGrow: CGFloat = 0.10    // past due the whole eye swells
     private static let overdueSag: CGFloat = 0.6      // and settles lower, the way a tired eye does
+
+    // On a call the breaks are held rather than refused, so the eye makes room for
+    // a bar beneath it: owed, but not asked for yet. The glyph already fills the
+    // 18pt box edge to edge, so the only way to find that room is to shrink the eye
+    // — everything else is derived from the rim, so the pupil comes with it.
+    private static let callScale: CGFloat = 0.84
+    private static let callLift: CGFloat = 1.5
+    private static let barY: CGFloat = 1.0, barH: CGFloat = 1.7, barW: CGFloat = 8.6
+
+    // Damage. Cracks splintering the rim are eye rests missed; a foot pressed into
+    // the pupil is a movement break missed. Both cap at three / on-off: past that
+    // the count stops meaning anything at 18pt and the glyph is already shouting.
+    static let maxCracks = 3
+    private static let crackAngles: [CGFloat] = [180, 0, 152]   // the lens corners first: where a strained eye actually cracks
+    private static let crackAlong: [CGFloat] = [0.9, -0.6, -2.2, -3.9]   // from just past the rim, inward
+    private static let crackSide: [CGFloat] = [0, 0.55, -0.5, 0.35]      // the jag
 
     /// How wide the lid is open, 1 = fully. A hint of a heavy upper lid arrives in
     /// the last stretch before the break, and that is the *only* narrowing there is.
@@ -70,35 +92,94 @@ enum IconMaker {
         let top: CGFloat, bottom: CGFloat
         let s: CGFloat        // 0…1: filling up to the break being due
         let over: CGFloat     // 0…1: overdue by that much of another interval
+        let restY: CGFloat    // where a loose, rested pupil settles
+        let pupilScale: CGFloat   // 1 normally; the eye is smaller on a call, so the pupil is too
 
         var outline: NSBezierPath { eyePath(cx: cx, cy: cy, halfW: halfW, top: top, bottom: bottom) }
     }
 
-    private static func shape(paused: Bool, strain: CGFloat) -> Shape {
+    private static func shape(paused: Bool, strain: CGFloat, onCall: Bool = false) -> Shape {
         let raw = paused ? 0 : max(0, min(2, strain))   // a paused eye rests, whatever the counter says
         let s = min(1, raw)
         let over = max(0, raw - 1)
         // The upper lid does nearly all the closing; the lower one barely moves.
         let open = openness(s)
-        let w = halfW * (1 + overdueGrow * over)        // overdue: the whole eye swells
+        let shrink = onCall ? callScale : 1             // make room under the eye for the held-on-a-call bar
+        let w = halfW * shrink * (1 + overdueGrow * over)   // overdue: the whole eye swells
+        let cy = glyphH / 2 - overdueSag * over + (onCall ? callLift : 0)   // ...and settles lower
         return Shape(cx: glyphW / 2,
-                     cy: glyphH / 2 - overdueSag * over,   // ...and settles lower
+                     cy: cy,
                      halfW: w,
                      top: w * open,
                      bottom: w * (0.35 + 0.65 * open),
-                     s: s, over: over)
+                     s: s, over: over,
+                     restY: cy - halfW * shrink * restPupilFrac,
+                     pupilScale: shrink)
+    }
+
+    /// A crack: a jagged fracture cut inward from the rim at `angleDeg`. Knocked
+    /// out rather than drawn on, for the same reason as the footprint — an added
+    /// stroke is ink on ink the moment the pupil floods the eye solid, and an
+    /// outward splinter has nowhere to go: the glyph already fills its 18pt box.
+    private static func crackPath(_ g: Shape, angleDeg: CGFloat) -> NSBezierPath {
+        let a = angleDeg * .pi / 180
+        let rim = NSPoint(x: g.cx + g.halfW * cos(a),
+                          y: g.cy + (sin(a) >= 0 ? g.top : g.bottom) * sin(a))
+        let dx = rim.x - g.cx, dy = rim.y - g.cy
+        let len = max(0.001, sqrt(dx * dx + dy * dy))
+        let d = NSPoint(x: dx / len, y: dy / len)          // outward
+        let n = NSPoint(x: -d.y, y: d.x)                   // along the rim
+
+        let p = NSBezierPath()
+        for (i, along) in crackAlong.enumerated() {
+            let side = crackSide[i]
+            let pt = NSPoint(x: rim.x + d.x * along + n.x * side,
+                             y: rim.y + d.y * along + n.y * side)
+            i == 0 ? p.move(to: pt) : p.line(to: pt)
+        }
+        p.lineWidth = 1.1
+        p.lineCapStyle = .round
+        p.lineJoinStyle = .round
+        return p
+    }
+
+    /// A bare foot pressed in, `h` tall. Sole plus three toes is the whole of what
+    /// survives at 18pt — a five-toed foot is not renderable at this size.
+    private static func footPath(cx: CGFloat, cy: CGFloat, h: CGFloat) -> NSBezierPath {
+        let w = h * 0.52
+        let soleH = h * 0.66
+        let p = NSBezierPath()
+        p.appendRoundedRect(NSRect(x: cx - w / 2, y: cy - h / 2, width: w, height: soleH),
+                            xRadius: w / 2, yRadius: w / 2)
+        let toeR = w * 0.185
+        let toeY = cy - h / 2 + soleH + toeR * 1.5
+        for i in -1...1 {
+            let tx = cx + CGFloat(i) * w * 0.38
+            let ty = toeY - (i == 0 ? 0 : toeR * 0.55)     // the middle toe leads
+            p.appendOval(in: NSRect(x: tx - toeR, y: ty - toeR, width: 2 * toeR, height: 2 * toeR))
+        }
+        return p
     }
 
     /// Draw the googly eye into the current context (glyphW x glyphH space).
     /// `nudge` glances the pupil up and away, the on-call "look away" cue.
-    static func drawEye(paused: Bool, nudge: Bool = false, strain: CGFloat = 0, color: NSColor) {
+    static func drawEye(paused: Bool, nudge: Bool = false, strain: CGFloat = 0,
+                        cracks: Int = 0, foot: Bool = false, onCall: Bool = false,
+                        color: NSColor) {
         color.set()
-        let g = shape(paused: paused, strain: strain)
+        let g = shape(paused: paused, strain: strain, onCall: onCall)
         let cx = g.cx, cy = g.cy, top = g.top, bottom = g.bottom, s = g.s, over = g.over
 
         let rim = g.outline
         rim.lineWidth = 1.5
         rim.stroke()
+
+        if onCall {
+            // Held, not refused: a solid rule under the eye. It is the one mark here
+            // that isn't damage, so it stays a clean straight line.
+            NSBezierPath(roundedRect: NSRect(x: cx - barW / 2, y: barY, width: barW, height: barH),
+                         xRadius: barH / 2, yRadius: barH / 2).fill()
+        }
 
         if paused {
             let slash = NSBezierPath()
@@ -118,9 +199,9 @@ enum IconMaker {
         // floods the whole eye solid — a light ring with a dot when you're rested,
         // a heavy filled mass when you've been putting the break off.
         let flood = min(1, over / 0.5)   // fully flooded half an interval past due, then it just sits lower
-        let r = restPupilR + (strainPupilR - restPupilR) * s + (overduePupilR - strainPupilR) * flood
+        let r = (restPupilR + (strainPupilR - restPupilR) * s + (overduePupilR - strainPupilR) * flood) * g.pupilScale
         let eyeMid = cy + (top - bottom) / 2          // the lens sinks as the lid drops
-        let py = restPupilY + (eyeMid - restPupilY) * s
+        let py = g.restY + (eyeMid - g.restY) * s
         // The white of the eye thins to nothing as it floods, so the fill and the
         // rim merge into one shape instead of leaving a hairline gap.
         let white = 1.05 * (1 - flood)
@@ -128,6 +209,29 @@ enum IconMaker {
         eyePath(cx: cx, cy: cy, halfW: g.halfW - white, top: top - white, bottom: bottom - white).addClip()
         NSBezierPath(ovalIn: NSRect(x: cx - r, y: py - r, width: 2 * r, height: 2 * r)).fill()
         NSGraphicsContext.restoreGraphicsState()
+
+        // A missed movement break is a foot pressed *into* the pupil — knocked out
+        // rather than drawn on, so it reads as an imprint at every strain instead of
+        // vanishing the moment the eye floods solid. Sized off the pupil so a small
+        // rested pupil isn't erased by it.
+        if foot {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.set()
+            footPath(cx: cx, cy: py, h: min(5.4, r * 1.25)).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        // Cracks last, so a fracture cuts through the rim and the flood alike.
+        if cracks > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.set()
+            for angle in crackAngles.prefix(min(maxCracks, cracks)) {
+                crackPath(g, angleDeg: angle).stroke()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     // MARK: the invariant
@@ -148,10 +252,13 @@ enum IconMaker {
     /// rises (hollow when rested, solid when overdue), and the ink never drops
     /// below the rested glyph (it must never thin to a hairline, which at menu-bar
     /// size reads as "off" rather than "tired").
-    static func measure(strain: CGFloat, samples: Int = 240) -> Measure {
-        let g = shape(paused: false, strain: strain)
+    static func measure(strain: CGFloat, cracks: Int = 0, foot: Bool = false, onCall: Bool = false,
+                        samples: Int = 240) -> Measure {
+        let g = shape(paused: false, strain: strain, onCall: onCall)
         return Measure(strain: strain,
-                       ink: coverage(samples) { drawEye(paused: false, strain: strain, color: .black) },
+                       ink: coverage(samples) {
+                           drawEye(paused: false, strain: strain, cracks: cracks, foot: foot, onCall: onCall, color: .black)
+                       },
                        silhouette: coverage(samples) { NSColor.black.set(); g.outline.fill() })
     }
 
@@ -183,7 +290,8 @@ enum IconMaker {
 
     /// Render the glyph big for review, black-on-light or white-on-dark (as the
     /// bar would tint it). `pace --make-menuicon <path> [paused] [dark] [nudge] [strain <0…1>]`.
-    static func writeMenuIconPreview(to path: String, paused: Bool, dark: Bool, nudge: Bool = false, strain: CGFloat = 0, height: Int = 360) -> Bool {
+    static func writeMenuIconPreview(to path: String, paused: Bool, dark: Bool, nudge: Bool = false, strain: CGFloat = 0,
+                                     cracks: Int = 0, foot: Bool = false, onCall: Bool = false, height: Int = 360) -> Bool {
         let w = Int(CGFloat(height) * glyphW / glyphH)
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: height,
@@ -197,7 +305,8 @@ enum IconMaker {
 
         let inset = CGFloat(height) * 0.14
         let glyphImg = NSImage(size: NSSize(width: glyphW, height: glyphH), flipped: false) { _ in
-            drawEye(paused: paused, nudge: nudge, strain: strain, color: dark ? .white : .black)
+            drawEye(paused: paused, nudge: nudge, strain: strain, cracks: cracks, foot: foot, onCall: onCall,
+                    color: dark ? .white : .black)
             return true
         }
         glyphImg.draw(in: NSRect(x: inset, y: inset, width: CGFloat(w) - 2 * inset, height: CGFloat(height) - 2 * inset))
@@ -234,6 +343,76 @@ enum IconMaker {
             img.draw(in: NSRect(x: x, y: CGFloat(pad * 2 + small), width: CGFloat(cell), height: CGFloat(cell)))
             img.draw(in: NSRect(x: x + CGFloat(cell / 2 - small / 2), y: CGFloat(pad),
                                 width: CGFloat(small), height: CGFloat(small)))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// One row of the damage grid: what the glyph is being asked to say.
+    private struct DamageRow {
+        let label: String
+        var cracks = 0
+        var foot = false
+        var onCall = false
+    }
+
+    private static let damageRows: [DamageRow] = [
+        DamageRow(label: "clean"),
+        DamageRow(label: "1 eye rest missed", cracks: 1),
+        DamageRow(label: "2 missed", cracks: 2),
+        DamageRow(label: "3+ missed", cracks: 3),
+        DamageRow(label: "movement missed", foot: true),
+        DamageRow(label: "2 eye + movement", cracks: 2, foot: true),
+        DamageRow(label: "on a call", onCall: true),
+        DamageRow(label: "on a call, both missed", cracks: 2, foot: true, onCall: true),
+    ]
+
+    /// Render every damage state against every strain as one grid: each cell shows
+    /// the glyph big, with the true retina bar size (18pt @2x) directly under it.
+    /// The small one is the only one that counts — a crack or a toe that reads at
+    /// 84px and disappears at 36px has not been drawn.
+    /// `pace --make-damagestrip <path> [dark]`.
+    static func writeDamageStrip(to path: String, dark: Bool, stages: [CGFloat] = [0, 0.5, 1.0, 1.5]) -> Bool {
+        let big = 84, small = Int(glyphW) * 2, pad = 9, gutter = 150, header = 26
+        let cellW = big + pad, cellH = big + pad / 2 + small + pad
+        let w = gutter + stages.count * cellW + pad
+        let h = header + damageRows.count * cellH + pad
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return false }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        let fg: NSColor = dark ? .white : .black
+        (dark ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.95, alpha: 1)).setFill()
+        NSRect(x: 0, y: 0, width: w, height: h).fill()
+
+        let text: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11), .foregroundColor: fg,
+        ]
+        for (col, stage) in stages.enumerated() {
+            let x = CGFloat(gutter + col * cellW)
+            NSAttributedString(string: String(format: "strain %.1f", stage), attributes: text)
+                .draw(at: NSPoint(x: x, y: CGFloat(h - header + 6)))
+        }
+
+        for (row, r) in damageRows.enumerated() {
+            let y = CGFloat(h - header - (row + 1) * cellH)
+            NSAttributedString(string: r.label, attributes: text)
+                .draw(at: NSPoint(x: CGFloat(pad), y: y + CGFloat(cellH) / 2))
+            for (col, stage) in stages.enumerated() {
+                let x = CGFloat(gutter + col * cellW)
+                let img = NSImage(size: NSSize(width: glyphW, height: glyphH), flipped: false) { _ in
+                    drawEye(paused: false, strain: stage, cracks: r.cracks, foot: r.foot, onCall: r.onCall, color: fg)
+                    return true
+                }
+                img.draw(in: NSRect(x: x, y: y + CGFloat(pad + small + pad / 2),
+                                    width: CGFloat(big), height: CGFloat(big)))
+                img.draw(in: NSRect(x: x + CGFloat(big / 2 - small / 2), y: y + CGFloat(pad),
+                                    width: CGFloat(small), height: CGFloat(small)))
+            }
         }
         NSGraphicsContext.restoreGraphicsState()
         guard let data = rep.representation(using: .png, properties: [:]) else { return false }

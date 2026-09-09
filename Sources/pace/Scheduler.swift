@@ -186,9 +186,16 @@ final class Scheduler {
         var overdue: Int      // seconds past due; 0 until then
         var strain: Double    // elapsed / interval, uncapped: above 1 means overdue
         var refusals: Int     // times put off since the last real rest
+        var nudges: Int       // times it came due on a call and was held, not asked
         var callHeldSec: Int  // of the time since the last rest, how much was on a call
 
         var name: String { kind.shortName }
+
+        /// Times this break was owed and didn't happen, however it didn't happen —
+        /// put off by you, or held back by a call. The bar draws damage off this
+        /// one number, because from the eye's point of view the two are the same
+        /// thing: a rest that was due and wasn't taken.
+        var missed: Int { refusals + nudges }
     }
 
     struct Status {
@@ -506,7 +513,7 @@ final class Scheduler {
 
     private func gauge(_ kind: BreakKind, _ t: Track, enabled: Bool, interval: Double) -> Gauge {
         guard enabled else {
-            return Gauge(kind: kind, enabled: false, remaining: 0, overdue: 0, strain: 0, refusals: 0, callHeldSec: 0)
+            return Gauge(kind: kind, enabled: false, remaining: 0, overdue: 0, strain: 0, refusals: 0, nudges: 0, callHeldSec: 0)
         }
         return Gauge(
             kind: kind,
@@ -515,6 +522,7 @@ final class Scheduler {
             overdue: Int(max(0, t.elapsed - interval)),
             strain: t.strain(interval: interval),
             refusals: t.refusals,
+            nudges: t.nudges,
             callHeldSec: Int(t.callHeld))
     }
 }

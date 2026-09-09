@@ -277,10 +277,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         // why extending no longer snaps the icon back to rested.
         let strain = min(2.0, max(0, s.eye.strain))
         let step = Int((strain * 12).rounded())   // 24 steps over 0…2: a 1s tick only redraws on a visible change
-        let key = "\(s.paused)-\(nudging)-\(step)"
+        // Damage: what was owed and didn't happen. The eye's misses crack the rim,
+        // a missed movement break presses a foot into the pupil — the one thing the
+        // move gauge has ever had on the bar. Both outlive the call that held them,
+        // so a call ending doesn't quietly wipe the debt off the icon.
+        let cracks = min(IconMaker.maxCracks, s.eye.missed)
+        let foot = s.move.enabled && s.move.missed > 0
+        let key = "\(s.paused)-\(nudging)-\(step)-\(cracks)-\(foot)-\(s.meeting)"
         if key != iconKey {
             iconKey = key
-            statusItem.button?.image = IconMaker.statusImage(paused: s.paused, nudge: nudging, strain: CGFloat(step) / 12)
+            statusItem.button?.image = IconMaker.statusImage(
+                paused: s.paused, nudge: nudging, strain: CGFloat(step) / 12,
+                cracks: cracks, foot: foot, onCall: s.meeting)
         }
 
         let summary: String

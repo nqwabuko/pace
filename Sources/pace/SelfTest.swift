@@ -48,6 +48,49 @@ enum SelfTest {
         check("white still showing when due", String(format: "%.2f", atDue), atDue < 0.90)
         check("solid once overdue (by 1.5)", String(format: "%.2f", flooded), flooded > 0.98)
 
+        // Damage: cracks for eye rests missed, a foot for a movement break missed.
+        // Both are knockouts, so unlike strain they take ink *away* — the monotonic
+        // checks above deliberately sweep the clean glyph only. What has to hold
+        // here is weaker but is the thing that actually breaks: a mark that renders
+        // as nothing. It happened once already — added splinters at the lens corners
+        // fell off the 18pt canvas the moment the overdue eye swelled, so the most
+        // damaged glyph drew identically to the clean one. Nothing caught it but a
+        // rendered strip and a pair of eyes; this is what catches it next time.
+        let marks: [(String, Int, Bool, Bool)] = [
+            ("1 crack", 1, false, false), ("2 cracks", 2, false, false), ("3 cracks", 3, false, false),
+            ("foot", 0, true, false), ("both", 3, true, false),
+            ("on a call", 0, false, true), ("on a call, both", 3, true, true),
+        ]
+        // In glyph-space units of area, and an absolute floor rather than a share
+        // of a glyph whose total ink trebles between rested and flooded.
+        //
+        // Be clear about what this does and doesn't prove. The faintest mark drawn
+        // measures 1.8 units — one crack on a rested eye, where it only has the
+        // 1.5pt rim to cut through — and that one is plainly visible, because a gap
+        // in a thin ring reads far louder than its area. So area under-measures the
+        // marks and the floor has to sit below the faintest real one. This catches a
+        // mark that renders as *nothing*, which is the failure that actually
+        // happened. It does not measure legibility: only the rendered strip at true
+        // bar size does that, and only a person can read it.
+        let minMark = 1.5
+        var faint: [String] = []
+        for st in [CGFloat(0), 0.5, 1.0, 1.5, 2.0] {
+            let clean = IconMaker.measure(strain: st).ink
+            for (name, cracks, foot, onCall) in marks {
+                let marked = IconMaker.measure(strain: st, cracks: cracks, foot: foot, onCall: onCall).ink
+                let delta = abs(marked - clean)
+                if delta < minMark { faint.append(String(format: "%@ @%.1f (%.1f)", name, st, delta)) }
+            }
+        }
+        check("every mark shows on the glyph it marks", faint.joined(separator: ", "), faint.isEmpty)
+
+        // And each extra crack has to be its own step, or the count is decoration.
+        let counted = [CGFloat(0), 1.0, 1.5].allSatisfy { st in
+            let inks = (0...IconMaker.maxCracks).map { IconMaker.measure(strain: st, cracks: $0).ink }
+            return zip(inks, inks.dropFirst()).allSatisfy { $0 - $1 > 0.5 }
+        }
+        check("each further crack cuts more away", "1…\(IconMaker.maxCracks)", counted)
+
         print("\nloop — extending a break must never credit a rest")
         let loop = extendFourTimes()
         check("counter keeps climbing through 4 extensions",
