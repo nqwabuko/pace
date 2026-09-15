@@ -219,8 +219,15 @@ final class Scheduler {
     /// handler has just changed the first and the second is a global — and carries
     /// the tick's own `now`, `delta`, `idle` and `inCall` through unchanged.
     private func tick() {
+        // `meetingAware` gates the sensor here, not just the rule. `Loop.step` ANDs
+        // the two again, so moving the check out of the loop can't change what the
+        // loop decides — but leaving it there would poll CoreAudio and CoreMediaIO
+        // once a second for someone who switched meeting-awareness off, which is
+        // what the old tick's short-circuit quietly avoided.
+        let cfg = Loop.Config.live()
         var t = Loop.Tick(now: env.wall(), delta: elapsedSinceLastTick(), idle: env.idleSec(),
-                          inCall: env.inCall(), overlayShowing: overlayShowing, config: .live())
+                          inCall: cfg.meetingAware && env.inCall(),
+                          overlayShowing: overlayShowing, config: cfg)
         var (s, effects) = Loop.step(state, .tick(t))
         state = s
         while let resume = apply(effects) {
