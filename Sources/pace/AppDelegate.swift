@@ -65,20 +65,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             // past due you were at the moment you decided what to do about it.
             let owed = self.lastStatus?.gauge(kind)
             self.scheduler.breakFinished(kind, reason)
+            let now = Date()
             Report.log(kind: kind.label, outcome: reason.logName,
                        seconds: reason == .completed ? kind.durationSec : 0,
                        overdueSec: owed?.overdue, refusals: owed?.refusals,
-                       callSec: owed?.callHeldSec)
+                       callSec: owed?.callHeldSec, now: now)
             let vault = Settings.vaultPath
-            if !vault.isEmpty { Report.updateVault(vault) }
+            if !vault.isEmpty { Report.updateVault(vault, now: now) }
         }
         scheduler.onAwayRest = { credits, awaySec in
+            let now = Date()
             for g in credits {
                 Report.log(kind: g.kind.label, outcome: "rested", seconds: awaySec,
                            overdueSec: g.overdue, refusals: g.refusals,
-                           callSec: g.callHeldSec)
+                           callSec: g.callHeldSec, now: now)
             }
-            if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
+            if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
         }
         scheduler.onBreakDue = { [weak self] kind, refusals in
             guard let self else { return }
@@ -257,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func handleCommand(_ text: String) {
-        guard let cmd = TimeParser.parse(text) else {
+        guard let cmd = TimeParser.parse(text, now: Date(), calendar: .current) else {
             popModel.feedback = "Couldn't read that. Try 20m, 1h 15m, @10am, pause 1h."
             return
         }
@@ -366,10 +368,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func deliverCallNudge(_ kind: BreakKind) {
         nudgeUntil = Date().addingTimeInterval(30)
         let owed = lastStatus?.gauge(kind)
+        let now = Date()
         Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
                    overdueSec: owed?.overdue, refusals: owed?.refusals,
-                   callSec: owed?.callHeldSec)
-        if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath) }
+                   callSec: owed?.callHeldSec, now: now)
+        if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
 
         guard notificationsAvailable else { return }
         let content = UNMutableNotificationContent()
@@ -415,24 +418,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, let url = panel.url {
             Settings.vaultPath = url.path
-            Report.updateVault(url.path, rebuildAll: true)
+            Report.updateVault(url.path, rebuildAll: true, now: Date())
             NSWorkspace.shared.open(Report.dashboardURL(url.path))
         }
     }
 
-    @objc private func openToday() { openVaultFile(Report.dailyURL(Settings.vaultPath)) }
+    @objc private func openToday() { openVaultFile(Report.dailyURL(Settings.vaultPath, now: Date())) }
     @objc private func openDashboard() { openVaultFile(Report.dashboardURL(Settings.vaultPath)) }
 
     @objc private func rebuildReport() {
         guard !Settings.vaultPath.isEmpty else { return needVaultAlert() }
-        Report.updateVault(Settings.vaultPath, rebuildAll: true)
+        Report.updateVault(Settings.vaultPath, rebuildAll: true, now: Date())
     }
 
     @objc private func stopLogging() { Settings.vaultPath = "" }
 
     private func openVaultFile(_ url: URL) {
         guard !Settings.vaultPath.isEmpty else { return needVaultAlert() }
-        if !FileManager.default.fileExists(atPath: url.path) { Report.updateVault(Settings.vaultPath) }
+        if !FileManager.default.fileExists(atPath: url.path) { Report.updateVault(Settings.vaultPath, now: Date()) }
         NSWorkspace.shared.open(url)
     }
 
@@ -451,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         // break off right now hasn't been written anywhere yet, and that is exactly
         // when you'd open this window.
         let open = (eye: lastStatus?.eye.callHeldSec ?? 0, move: lastStatus?.move.callHeldSec ?? 0)
-        let host = NSHostingController(rootView: StatsView(s: Report.summary(openCall: open)))
+        let host = NSHostingController(rootView: StatsView(s: Report.summary(now: Date(), openCall: open)))
         if let w = statsWindow {
             w.contentViewController = host
             w.setContentSize(statsSize)

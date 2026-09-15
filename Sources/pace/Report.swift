@@ -92,7 +92,7 @@ enum Report {
 
     static func log(kind: String, outcome: String, seconds: Int,
                     overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil,
-                    now: Date = Date()) {
+                    now: Date) {
         let ev = BreakEvent(at: now, kind: kind, outcome: outcome, seconds: seconds,
                             overdueSec: overdueSec, refusals: refusals, callSec: callSec)
         guard let data = try? enc.encode(ev), let line = String(data: data, encoding: .utf8) else { return }
@@ -115,7 +115,7 @@ enum Report {
     // MARK: in-app stats
 
     /// Aggregates for the glanceable in-app charts (last `daysBack` days).
-    static func summary(now: Date = Date(), daysBack: Int = 14,
+    static func summary(now: Date, daysBack: Int = 14,
                         openCall: (eye: Int, move: Int) = (0, 0)) -> StatsSummary {
         summary(from: events(), now: now, daysBack: daysBack, openCall: openCall)
     }
@@ -129,7 +129,7 @@ enum Report {
     /// with no break taken yet reads as zero everywhere — which is precisely the
     /// afternoon you would want to look at this panel. The two never overlap: the log
     /// holds the closed stretches, this is the open one, so they add.
-    static func summary(from evs: [BreakEvent], now: Date = Date(), daysBack: Int = 14,
+    static func summary(from evs: [BreakEvent], now: Date, daysBack: Int = 14,
                         openCall: (eye: Int, move: Int) = (0, 0)) -> StatsSummary {
         let cal = Calendar.current
         let byDay = Dictionary(grouping: evs) { dayKey($0.at) }
@@ -231,7 +231,7 @@ enum Report {
     static func vaultBase(_ vaultPath: String) -> URL {
         URL(fileURLWithPath: vaultPath).appendingPathComponent("pace", isDirectory: true)
     }
-    static func dailyURL(_ vaultPath: String, now: Date = Date()) -> URL {
+    static func dailyURL(_ vaultPath: String, now: Date) -> URL {
         vaultBase(vaultPath).appendingPathComponent("\(dayKey(now)).md")
     }
     static func dashboardURL(_ vaultPath: String) -> URL {
@@ -242,7 +242,7 @@ enum Report {
     /// the main thread and reports what happened rather than swallowing it, so a
     /// vault that has moved, been deleted, or gone offline is visible in the menu
     /// instead of silently doing nothing for weeks.
-    static func updateVault(_ vaultPath: String, rebuildAll: Bool = false, now: Date = Date()) {
+    static func updateVault(_ vaultPath: String, rebuildAll: Bool = false, now: Date) {
         guard !vaultPath.isEmpty else { return }
         io.async {
             let evs = events()
@@ -257,14 +257,14 @@ enum Report {
 
     /// Render a folder of sample notes (for `pace --report-demo <dir>`), so the
     /// Obsidian format can be previewed without touching the real log.
-    static func previewVault(at path: String, now: Date = Date()) {
+    static func previewVault(at path: String, now: Date) {
         _ = render(sampleEvents(now: now), base: URL(fileURLWithPath: path).appendingPathComponent("pace", isDirectory: true), rebuildAll: true, now: now)
     }
 
     /// A made-up fortnight: breaks taken, some extended a few times first, the odd
     /// skip, and a lunch break every fifth day. Feeds both the sample vault and the
     /// stats-window preview, so what you review is what the real code renders.
-    static func sampleEvents(now: Date = Date()) -> [BreakEvent] {
+    static func sampleEvents(now: Date) -> [BreakEvent] {
         var evs: [BreakEvent] = []
         let cal = Calendar.current
         for d in 0..<14 {
@@ -299,7 +299,7 @@ enum Report {
 
     /// Try one vault write and say what happened, for `pace --check`. The same
     /// code path the app uses, run synchronously so the CLI can report it.
-    static func probeVault(_ vaultPath: String, now: Date = Date()) -> String? {
+    static func probeVault(_ vaultPath: String, now: Date) -> String? {
         guard !vaultPath.isEmpty else { return "not logging" }
         return io.sync { render(events(), base: vaultBase(vaultPath), rebuildAll: false, now: now) }
     }

@@ -15,7 +15,7 @@ if let i = args.firstIndex(of: "--make-icon") {
 if let i = args.firstIndex(of: "--parse") {
     Settings.registerDefaults()
     let text = args[(i + 1)...].joined(separator: " ")
-    if let cmd = TimeParser.parse(text) { print(cmd.human) } else { print("(couldn't parse)") }
+    if let cmd = TimeParser.parse(text, now: Date(), calendar: .current) { print(cmd.human) } else { print("(couldn't parse)") }
     exit(0)
 }
 
@@ -57,7 +57,7 @@ if let i = args.firstIndex(of: "--feedback"), i + 2 < args.count, let kind = Fee
 // `--report-demo <dir>`: render a folder of sample Obsidian notes to preview the
 // reporting format, without touching the real log.
 if let i = args.firstIndex(of: "--report-demo"), i + 1 < args.count {
-    Report.previewVault(at: args[i + 1])
+    Report.previewVault(at: args[i + 1], now: Date())
     print("wrote sample vault to \(args[i + 1])/pace/")
     exit(0)
 }
@@ -71,8 +71,9 @@ if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     let h = i + 2 < args.count ? (Int(args[i + 2]) ?? 900) : 900
     // `--real` renders the actual log instead, which is how you reproduce a stats
     // window that looks wrong on this machine without opening it over the desktop.
-    let evs = args.contains("--real") ? Report.events() : Report.sampleEvents()
-    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: evs), height: h)
+    let now = Date()
+    let evs = args.contains("--real") ? Report.events() : Report.sampleEvents(now: now)
+    let ok = StatsPreview.write(to: args[i + 1], s: Report.summary(from: evs, now: now), height: h)
     print(ok ? "wrote \(args[i + 1])" : "failed to render")
     exit(ok ? 0 : 1)
 }
@@ -101,7 +102,7 @@ if let ci = args.firstIndex(of: "--check") {
     print("login item : \(LoginItem.enabled.map(String.init) ?? "n/a — ask the installed app, not this binary")")
     let vault = ci + 1 < args.count ? args[ci + 1] : Settings.vaultPath
     print("vault      : \(vault.isEmpty ? "not logging" : vault)")
-    if !vault.isEmpty { print("vault write: \(Report.probeVault(vault) ?? "OK")") }
+    if !vault.isEmpty { print("vault write: \(Report.probeVault(vault, now: Date()) ?? "OK")") }
     exit(0)
 }
 

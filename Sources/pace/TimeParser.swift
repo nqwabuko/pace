@@ -28,7 +28,7 @@ enum Command: Equatable {
 enum TimeParser {
     enum When { case after(TimeInterval); case at(Date) }
 
-    static func parse(_ raw: String, now: Date = Date(), calendar: Calendar = .current) -> Command? {
+    static func parse(_ raw: String, now: Date, calendar: Calendar) -> Command? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !s.isEmpty else { return nil }
 
