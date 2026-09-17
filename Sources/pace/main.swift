@@ -54,10 +54,27 @@ if let i = args.firstIndex(of: "--feedback"), i + 2 < args.count, let kind = Fee
     exit(0)
 }
 
-// `--report-demo <dir>`: render a folder of sample Obsidian notes to preview the
-// reporting format, without touching the real log.
+// `--report-demo <dir> [yyyy-mm-dd]`: render a folder of sample Obsidian notes to
+// preview the reporting format, without touching the real log.
+//
+// The sample fortnight is generated backwards from `now`, so with no date the whole
+// tree renames itself every midnight. That is right for a human previewing the format
+// and useless for `check.sh`, which has to diff this against a stored baseline. The
+// optional date pins it. Noon, so a clock going forward or back an hour can't tip the
+// day either way.
 if let i = args.firstIndex(of: "--report-demo"), i + 1 < args.count {
-    Report.previewVault(at: args[i + 1], now: Date())
+    var when = Date()
+    if i + 2 < args.count {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let day = f.date(from: args[i + 2]) else {
+            FileHandle.standardError.write(Data("report-demo: '\(args[i + 2])' is not yyyy-mm-dd\n".utf8))
+            exit(2)
+        }
+        when = day.addingTimeInterval(12 * 3600)
+    }
+    Report.previewVault(at: args[i + 1], now: when)
     print("wrote sample vault to \(args[i + 1])/pace/")
     exit(0)
 }

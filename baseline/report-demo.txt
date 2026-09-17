@@ -1,0 +1,490 @@
+wrote sample vault to <TMP>/pace/
+./pace/2026-09-02.md
+./pace/2026-09-03.md
+./pace/2026-09-04.md
+./pace/2026-09-05.md
+./pace/2026-09-06.md
+./pace/2026-09-07.md
+./pace/2026-09-08.md
+./pace/2026-09-09.md
+./pace/2026-09-10.md
+./pace/2026-09-11.md
+./pace/2026-09-12.md
+./pace/2026-09-13.md
+./pace/2026-09-14.md
+./pace/2026-09-15.md
+./pace/pace-dashboard.md
+--- file contents ---
+=== ./pace/2026-09-02.md ===
+---
+date: 2026-09-02
+pace_eye: 7
+pace_move: 2
+pace_skipped: 0
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 5
+pace_break_minutes: 7
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-02
+
+7 eye · 2 move · 0 skipped · 7 min resting
+Put off 1× · 5 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | completed | 5m 0s | 1 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-03.md ===
+---
+date: 2026-09-03
+pace_eye: 6
+pace_move: 1
+pace_skipped: 1
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 0
+pace_break_minutes: 5
+pace_call_held_eye_min: 20
+pace_call_held_move_min: 35
+---
+# pace · 2026-09-03
+
+6 eye · 1 move · 1 skipped · 5 min resting
+Put off 1× · 0 min of eye time past due
+Held by calls: 20 min without an eye rest · 35 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | completed | 0m 0s | 0 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 20m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 35m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+=== ./pace/2026-09-04.md ===
+---
+date: 2026-09-04
+pace_eye: 5
+pace_move: 3
+pace_skipped: 0
+pace_put_off: 3
+pace_away_rests: 0
+pace_eye_overdue_min: 15
+pace_break_minutes: 8
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-04
+
+5 eye · 3 move · 0 skipped · 8 min resting
+Put off 3× · 15 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | snoozed | 10m 0s | 2 | – |
+| 09:35 | eye | completed | 15m 0s | 3 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:40 | move | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-05.md ===
+---
+date: 2026-09-05
+pace_eye: 4
+pace_move: 2
+pace_skipped: 1
+pace_put_off: 3
+pace_away_rests: 1
+pace_eye_overdue_min: 20
+pace_break_minutes: 6
+pace_call_held_eye_min: 40
+pace_call_held_move_min: 55
+---
+# pace · 2026-09-05
+
+4 eye · 2 move · 1 skipped · 6 min resting
+Put off 3× · 20 min of eye time past due
+Held by calls: 40 min without an eye rest · 55 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | completed | 10m 0s | 2 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 40m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 55m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+| 13:00 | eye | rested | 10m 0s | 1 | – |
+| 13:00 | move | rested | 10m 0s | 1 | – |
+=== ./pace/2026-09-06.md ===
+---
+date: 2026-09-06
+pace_eye: 8
+pace_move: 1
+pace_skipped: 0
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 5
+pace_break_minutes: 6
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-06
+
+8 eye · 1 move · 0 skipped · 6 min resting
+Put off 1× · 5 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | completed | 5m 0s | 1 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | completed | 0m 0s | 0 | 0m |
+| 11:20 | eye | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-07.md ===
+---
+date: 2026-09-07
+pace_eye: 7
+pace_move: 3
+pace_skipped: 1
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 0
+pace_break_minutes: 9
+pace_call_held_eye_min: 20
+pace_call_held_move_min: 35
+---
+# pace · 2026-09-07
+
+7 eye · 3 move · 1 skipped · 9 min resting
+Put off 1× · 0 min of eye time past due
+Held by calls: 20 min without an eye rest · 35 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | completed | 0m 0s | 0 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 20m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 35m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+| 11:40 | move | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-08.md ===
+---
+date: 2026-09-08
+pace_eye: 6
+pace_move: 2
+pace_skipped: 0
+pace_put_off: 3
+pace_away_rests: 0
+pace_eye_overdue_min: 15
+pace_break_minutes: 7
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-08
+
+6 eye · 2 move · 0 skipped · 7 min resting
+Put off 3× · 15 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | snoozed | 10m 0s | 2 | – |
+| 09:35 | eye | completed | 15m 0s | 3 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-09.md ===
+---
+date: 2026-09-09
+pace_eye: 5
+pace_move: 1
+pace_skipped: 1
+pace_put_off: 3
+pace_away_rests: 0
+pace_eye_overdue_min: 10
+pace_break_minutes: 4
+pace_call_held_eye_min: 40
+pace_call_held_move_min: 55
+---
+# pace · 2026-09-09
+
+5 eye · 1 move · 1 skipped · 4 min resting
+Put off 3× · 10 min of eye time past due
+Held by calls: 40 min without an eye rest · 55 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | completed | 10m 0s | 2 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 40m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 55m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+=== ./pace/2026-09-10.md ===
+---
+date: 2026-09-10
+pace_eye: 4
+pace_move: 3
+pace_skipped: 0
+pace_put_off: 1
+pace_away_rests: 1
+pace_eye_overdue_min: 15
+pace_break_minutes: 8
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-10
+
+4 eye · 3 move · 0 skipped · 8 min resting
+Put off 1× · 15 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | completed | 5m 0s | 1 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:40 | move | completed | 0m 0s | 0 | 0m |
+| 13:00 | eye | rested | 10m 0s | 1 | – |
+| 13:00 | move | rested | 10m 0s | 1 | – |
+=== ./pace/2026-09-11.md ===
+---
+date: 2026-09-11
+pace_eye: 8
+pace_move: 2
+pace_skipped: 1
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 0
+pace_break_minutes: 8
+pace_call_held_eye_min: 20
+pace_call_held_move_min: 35
+---
+# pace · 2026-09-11
+
+8 eye · 2 move · 1 skipped · 8 min resting
+Put off 1× · 0 min of eye time past due
+Held by calls: 20 min without an eye rest · 35 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | completed | 0m 0s | 0 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 20m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 35m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+| 11:20 | eye | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-12.md ===
+---
+date: 2026-09-12
+pace_eye: 7
+pace_move: 1
+pace_skipped: 0
+pace_put_off: 3
+pace_away_rests: 0
+pace_eye_overdue_min: 15
+pace_break_minutes: 5
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-12
+
+7 eye · 1 move · 0 skipped · 5 min resting
+Put off 3× · 15 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | snoozed | 10m 0s | 2 | – |
+| 09:35 | eye | completed | 15m 0s | 3 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-13.md ===
+---
+date: 2026-09-13
+pace_eye: 6
+pace_move: 3
+pace_skipped: 1
+pace_put_off: 3
+pace_away_rests: 0
+pace_eye_overdue_min: 10
+pace_break_minutes: 9
+pace_call_held_eye_min: 40
+pace_call_held_move_min: 55
+---
+# pace · 2026-09-13
+
+6 eye · 3 move · 1 skipped · 9 min resting
+Put off 3× · 10 min of eye time past due
+Held by calls: 40 min without an eye rest · 55 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | snoozed | 5m 0s | 1 | – |
+| 09:30 | eye | completed | 10m 0s | 2 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 40m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 55m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+| 11:40 | move | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-14.md ===
+---
+date: 2026-09-14
+pace_eye: 5
+pace_move: 2
+pace_skipped: 0
+pace_put_off: 1
+pace_away_rests: 0
+pace_eye_overdue_min: 5
+pace_break_minutes: 6
+pace_call_held_eye_min: 0
+pace_call_held_move_min: 0
+---
+# pace · 2026-09-14
+
+5 eye · 2 move · 0 skipped · 6 min resting
+Put off 1× · 5 min of eye time past due
+Held by calls: 0 min without an eye rest · 0 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | snoozed | 0m 0s | 0 | – |
+| 09:25 | eye | completed | 5m 0s | 1 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 0m |
+| 10:20 | eye | completed | 0m 0s | 0 | 0m |
+| 10:50 | move | completed | 0m 0s | 0 | 0m |
+=== ./pace/2026-09-15.md ===
+---
+date: 2026-09-15
+pace_eye: 4
+pace_move: 1
+pace_skipped: 1
+pace_put_off: 1
+pace_away_rests: 1
+pace_eye_overdue_min: 10
+pace_break_minutes: 4
+pace_call_held_eye_min: 20
+pace_call_held_move_min: 35
+---
+# pace · 2026-09-15
+
+4 eye · 1 move · 1 skipped · 4 min resting
+Put off 1× · 10 min of eye time past due
+Held by calls: 20 min without an eye rest · 35 min without moving
+
+| time | break | outcome | overdue | put off before | on a call |
+|------|-------|---------|---------|----------------|-----------|
+| 09:00 | eye | completed | 0m 0s | 0 | 0m |
+| 09:20 | eye | completed | 0m 0s | 0 | 0m |
+| 09:40 | eye | completed | 0m 0s | 0 | 20m |
+| 10:00 | eye | completed | 0m 0s | 0 | 0m |
+| 10:00 | move | completed | 0m 0s | 0 | 35m |
+| 11:00 | eye | skipped | 0m 0s | 0 | – |
+| 13:00 | eye | rested | 10m 0s | 1 | – |
+| 13:00 | move | rested | 10m 0s | 1 | – |
+=== ./pace/pace-dashboard.md ===
+---
+updated: 12:00 2026-09-15
+---
+# pace dashboard
+
+## Averages
+- **Last 7 days:** 7.4 taken/day · 6 min/day resting · 1.9 put off/day · 65 min past due · 90% first time
+  - *Held by calls:* 120 min without an eye rest, 180 min without moving
+- **Last 30 days:** 3.6 taken/day · 3 min/day resting · 0.9 put off/day · 125 min past due · 91% first time
+  - *Held by calls:* 200 min without an eye rest, 305 min without moving
+- **Streak:** 14 days with a break
+
+## Breaks per day (last 14 days)
+```text
+09-02  █████████░  9
+09-03  ███████░░░  7
+09-04  ████████░░  8
+09-05  ██████░░░░  6
+09-06  █████████░  9
+09-07  ██████████  10
+09-08  ████████░░  8
+09-09  ██████░░░░  6
+09-10  ███████░░░  7
+09-11  ██████████  10
+09-12  ████████░░  8
+09-13  █████████░  9
+09-14  ███████░░░  7
+09-15  █████░░░░░  5
+```
+
+## Eye vs move (last 30 days)
+```mermaid
+pie showData
+    title Breaks by type
+    "Eye" : 82
+    "Move" : 27
+```

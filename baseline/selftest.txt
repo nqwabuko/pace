@@ -1,0 +1,90 @@
+
+glyph — the icon must never look calmer the more rest you owe
+  ok   ink only ever increases
+  ok   solidity never falls
+  ok   hollow when rested   0.57
+  ok   white still showing when due   0.82
+  ok   solid once overdue (by 1.5)   1.00
+  ok   every mark shows on the glyph it marks
+  ok   each further crack cuts more away   1…3
+
+loop — extending a break must never credit a rest
+  ok   counter keeps climbing through 4 extensions   1.00 → 2.00 → 3.00 → 4.00
+  ok   four extensions are all counted   refusals=4
+  ok   taking it finally rests you   0.00
+
+card — the chain on the break card must be the loop's own trail, in order
+  ok   the card is handed what actually happened, in order   snoozed → snoozed → snoozed → snoozed
+  ok   an extension, an extension, a skip stay in that order   snoozed → snoozed → skipped
+  ok   taking the break clears the story   0 marks left
+  ok   a call holding a break back is on the trail but is not a refusal   trail=held refusals=0
+  ok   the line under the chain says what happened, not just how often   You've put this one off twice and skipped it once since your last rest.
+  ok   a call-held break is not blamed on you   A call held it back once.
+  ok   a break that turns up on time gets no chain and no line   (nothing)
+
+the card machine — every state must take every event, and only one path may end a break
+  ok   no event ends a break twice   1 ended per step
+  ok   with no card up, everything but showing one is a non-event
+  ok   Skip and a click off the card are the same refusal
+  ok   +5 is snoozed, already-rested is completed, a call is interrupted
+  ok   only a natural finish asks for the chime
+  ok   a card can never outlive its own countdown
+  ok   a tick that doesn't change the clock repaints nothing
+  ok   the backstop ends the card whatever the clock says
+
+the card's copy — what is drawn is a function of the trail, and nothing else
+  ok   the step is the last thing that happened, however long the run   7 marks → held
+  ok   how late it is belongs to the chain, not the sentence   22m late
+  ok   a break with no story draws nothing at all
+
+debt — extensions and the time they cost must both survive the log
+  ok   a line written before overdue/refusals/call time existed still decodes   completed overdue=nil call=nil
+  ok   past due counts the event that cleared the debt, once   1500s
+  ok   both extensions and the skip count as put off   3×
+  ok   first-time split ignores rows with no refusals recorded   first=1 once=0 more=1
+  ok   a legacy day still shows its breaks, with no debt claimed   eye=2 overdue=0
+  ok   a long spell away records the debt you walked away with, not the time away   eye overdue=240s put off 1× away=1200s
+
+nights — one absence is one rest, however often the machine wakes itself
+  ok   a night of dark wakes credits one rest, not one per wake   1 rests logged
+  ok   and the one it credits is the whole night   37601s
+  ok   nothing accrues as screen work while nobody is there   elapsed=0s
+
+calls — a call that stops you moving must show up as time, not nothing
+  ok   an hour on a call is an hour held off both breaks   eye=3600s move=3600s
+  ok   and the frozen debt still reports nothing, which is why this exists   elapsed=600s
+  ok   taking the break clears what calls were holding   0s
+  ok   call time still standing against a break shows today, before any break closes   today=3600s week=3600s
+  ok   and it adds to what the day already closed, never replacing it   4200s
+  ok   call time counts the event that cleared the debt, once   eye=2400s
+  ok   eye and move are reported apart, never summed   eye=2400s move=3000s
+  ok   a row written before call time existed claims none   0s
+
+absence — a screen that never locks is not a human who never left
+  ok   no break fires while nobody is at the machine   0 fired
+  ok   coming back credits the hour away as a rest   away=3600s
+  ok   the rest records the debt at the door, not the hour away   remaining=1079s of 1080s
+  ok   and you get the full interval back   quiet=1140s then fired=true
+  ok   with the reset switched off, still nothing fires at an empty room   0 fired
+  ok   ...and the hour away credits nothing, which is what the switch is for   no rest credited
+  ok   ...so the break you were owed is waiting the moment you're back   fired after 0s
+  ok   a sleep the run loop never saw counts as a rest too   away=3600s remaining=1080s of 1080s
+
+keyboard — every button on the card must have a key, and no key may act alone
+  ok   ⌘S skips
+  ok   ⌘5 buys five more minutes
+  ok   ⌘D says you already did it
+  ok   Esc still skips, with or without ⌘
+  ok   Return still credits it, from either Enter key
+  ok   a bare letter is not a shortcut
+  ok   ⌘ plus another modifier is left alone
+  ok   caps lock doesn't break it
+  ok   ⌘Q and friends pass through
+
+vault health — a broken vault must read as broken, then heal
+  ok   three failures count as three   3
+  ok   a success clears it
+
+all checks passed
+
+exit: 0

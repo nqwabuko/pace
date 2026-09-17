@@ -1,0 +1,20 @@
+25m                                -> move break in 25m
+break in 10m                       -> move break in 10m
+eye break in 5 minutes             -> eye break in 5m
+move break at 3pm                  -> move break at 15:00
+@3pm                               -> move break at 15:00
+pause 1h                           -> paused for 1h
+pause until 5pm                    -> paused until 17:00
+pause for 30 minutes               -> paused for 30m
+2h                                 -> move break in 2h
+in an hour                         -> (couldn't parse)
+move in 45m                        -> move break in 45m
+stretch at 14:30                   -> move break in 14m 30s
+eyes in 20                         -> eye break in 20m
+half an hour                       -> (couldn't parse)
+tomorrow                           -> (couldn't parse)
+banana                             -> (couldn't parse)
+at 9                               -> move break in 9m
+5s                                 -> move break in 5s
+0m                                 -> (couldn't parse)
+-10m                               -> (couldn't parse)
