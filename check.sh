@@ -74,6 +74,10 @@ eye 5m, moveoff, work 4m, pause 1m, work 3m
 eye 5m, moveoff, nudges, work 4m, pause 30m, call 10m, work 10m
 eye 5m, moveoff, nudges, work 5m, snooze, call 30m, work 10m
 eyeoff, moveoff, work 10m, lock 30m, work 5m
+eye 5m, moveoff, nudges, work 5m, call 30m, work 5m
+eye 5m, moveoff, nudges, work 5m, call 4m, work 5m
+eye 5m, moveoff, nudges, work 5m, call 10m, work 1m, call 10m, work 5m
+eye 5m, move 10m, nudges, work 12m, call 45m, work 5m
 SCRIPTS
 
 {

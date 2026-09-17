@@ -62,6 +62,7 @@ enum Deferral {
     static let interruptSec: TimeInterval = 2 * 60   // a call cut it short: try again soon
     static let nudgeSec: TimeInterval = 5 * 60       // first gap between on-call nudges
     static let nudgeCapSec: TimeInterval = 30 * 60   // and the longest it backs off to
+    static let callGraceSec: TimeInterval = 5 * 60   // a meeting's opening minutes are its own
 }
 
 /// The outside world the loop reads: two clocks and two sensors. Injected so the

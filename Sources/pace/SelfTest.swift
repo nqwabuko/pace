@@ -122,6 +122,23 @@ enum SelfTest {
         check("a break that turns up on time gets no chain and no line", story.cleanLine ?? "(nothing)",
               story.cleanLine == nil)
 
+        print("\na meeting's opening minutes — and the break you asked for anyway")
+        let call = callManners()
+        // The grace holds the banner, never the debt. If the counter stopped climbing
+        // too, a morning of back-to-back calls would come out owing nothing.
+        check("a nudge waits out the start of a call", "\(call.firstNudgeSec)s in",
+              call.firstNudgeSec == Int(Deferral.callGraceSec))
+        check("the break is still owed while it waits", "elapsed \(call.elapsedAtNudge)s",
+              call.elapsedAtNudge > 0)
+        check("waiting is not a refusal, because you were never asked",
+              "refusals=\(call.refusalsAtNudge)", call.refusalsAtNudge == 0)
+        // The one that no `--sim` script can reach: the simulator has no verb for the
+        // menu's "break now", which is exactly how this went unnoticed on a live call.
+        check("a break you asked for is not swept away by a call",
+              call.askedForSurvives ? "stays up" : "dismissed", call.askedForSurvives)
+        check("a break that turned up by itself still steps aside",
+              call.unaskedDismissed ? "dismissed" : "stayed up", call.unaskedDismissed)
+
         print("\nthe card machine — every state must take every event, and only one path may end a break")
         let start = Date(timeIntervalSince1970: 1_755_000_000)
         let session = Card.Session(kind: .eye, trail: [.snoozed], overdueSec: 300, durationSec: 20,
@@ -705,6 +722,47 @@ enum SelfTest {
 
     /// On a call, with on-call nudges on: the one configuration that marks a trail
     /// without the user touching anything.
+    /// Two manners a call asks of the loop, driven through the reducer a minute at a
+    /// time. Both are invisible to `--sim`: the first because a grace only shows up as
+    /// an absence, the second because the simulator has no verb for the menu's
+    /// "break now" — which is precisely how it went unnoticed on a live call.
+    private static func callManners()
+        -> (firstNudgeSec: Int, elapsedAtNudge: Double, refusalsAtNudge: Int,
+            askedForSurvives: Bool, unaskedDismissed: Bool) {
+        let t0 = Date(timeIntervalSince1970: 1_755_000_000)
+        func tick(_ s: Loop.State, at sec: Int, inCall: Bool, overlay: Bool = false)
+            -> (Loop.State, [Loop.Effect]) {
+            Loop.step(s, .tick(.init(now: t0.addingTimeInterval(Double(sec)), delta: 60, idle: 0,
+                                     inCall: inCall, overlayShowing: overlay, config: callConfig)))
+        }
+
+        // Work past the eye interval off-call, so the break is already owed when the
+        // call lands. Then stay on the call and wait for the banner.
+        var s = Loop.State()
+        for m in 1...25 { (s, _) = tick(s, at: m * 60, inCall: false) }
+        let callStart = 26 * 60
+        var nudgeAt = -1, elapsed = 0.0, refusals = 0
+        for m in 26...45 {
+            let (next, fx) = tick(s, at: m * 60, inCall: true)
+            s = next
+            if nudgeAt < 0, fx.contains(where: { if case .callNudge = $0 { return true }; return false }) {
+                nudgeAt = m * 60 - callStart
+                elapsed = s.eye.elapsed
+                refusals = s.eye.refusals
+            }
+        }
+
+        // The same second of the same call, asked for and not. Only the break that
+        // turned up by itself may be swept off the screen.
+        func dismissed(askedFor: Bool) -> Bool {
+            var c = Loop.State()
+            if askedFor { (c, _) = Loop.step(c, .triggerNow(.eye, overlayShowing: false)) }
+            let (_, fx) = tick(c, at: 60, inCall: true, overlay: true)
+            return fx.contains { if case .meetingDuringBreak = $0 { return true }; return false }
+        }
+        return (nudgeAt, elapsed, refusals, !dismissed(askedFor: true), dismissed(askedFor: false))
+    }
+
     private static let callConfig = Loop.Config(
         eyeEnabled: true, moveEnabled: true, eyeIntervalSec: 20 * 60, moveIntervalSec: 45 * 60,
         meetingAware: true, callBreaks: true, idleAware: true, awayResetSec: 15 * 60)

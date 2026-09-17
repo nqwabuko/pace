@@ -129,6 +129,19 @@ enum Loop {
         /// When a human was last demonstrably at the machine. The one source for "have
         /// I been away, and for how long".
         var lastPresence: Date?
+
+        /// When the call now in progress started, or nil if there isn't one. The loop
+        /// has always known *that* you're on a call and never *how long for*, so a
+        /// break coming due two minutes into a meeting was indistinguishable from one
+        /// coming due at the end of a long one. It is the call's own clock, not the
+        /// break's: it resets at every call, so back-to-back meetings each get their
+        /// own quiet opening.
+        var callSince: Date?
+
+        /// Is the break on screen one you asked for? A break that turns up by itself
+        /// gets out of the way when a call starts. One you chose from the menu does
+        /// not, because you picked it knowing what you were in.
+        var askedFor = false
     }
 
     /// One break type's public reading. A value rather than a handful of loose
@@ -270,9 +283,11 @@ enum Loop {
             // taking it does, so nothing is credited here — and no tick runs, so
             // there is no status reading either.
             guard !overlayShowing else { return (s, []) }
+            s.askedFor = true
             return (s, [.breakDue(kind, trail: trail(s, kind))])
 
         case .breakFinished(let kind, let reason, let now):
+            s.askedFor = false   // whatever it was, it's over
             if reason.creditsRest {
                 s = credited(s, kind)
             } else {
@@ -336,6 +351,11 @@ enum Loop {
             // enabled we instead keep counting and deliver a gentle nudge at the fire
             // points below, so call-heavy days still get micro-breaks.
             let onCall = t.config.meetingAware && t.inCall
+
+            // The call's own clock, started on the edge and thrown away when the call
+            // drops. `fire` reads it to leave a meeting's opening minutes alone.
+            s.callSince = onCall ? (s.callSince ?? t.now) : nil
+
             if onCall {
                 // How long a call has kept you from each break. Counted here, above the
                 // holding return, because it has to mean the same thing in both call
@@ -358,7 +378,12 @@ enum Loop {
                 // preferences freshly sampled — exactly what the old code saw when the
                 // handler returned and it read those two globals again. No status goes
                 // out on this path; the resumed half emits it, after the nested tick's.
-                if t.overlayShowing {
+                //
+                // Unless you asked for it. "Never cover a call" is there to stop the
+                // app ambushing you, and a break you chose from the menu while already
+                // on the call is the opposite of an ambush — pulling it off the screen
+                // is the app overruling you, which is the thing it was trying not to do.
+                if t.overlayShowing, !s.askedFor {
                     fx.append(.meetingDuringBreak)
                     fx.append(.resumeTick(t, onCall: true))
                     return (s, fx)
@@ -468,6 +493,13 @@ enum Loop {
     /// break is not resting, so the counter keeps climbing through a whole call.
     static func fire(_ s: State, _ kind: BreakKind, onCall: Bool, now: Date, _ c: Config) -> (State, [Effect]) {
         guard onCall else { return (s, [.breakDue(kind, trail: trail(s, kind))]) }
+        // A meeting that has only just started gets its opening minutes back. The break
+        // stays owed and the counter keeps climbing, so nothing is forgiven — it is the
+        // banner that waits. A nudge two minutes into a call arrives while you are still
+        // saying hello, and it is not a thing you can act on; the same nudge twenty
+        // minutes in is. Held back this way it is not a refusal either, because you were
+        // never asked.
+        if let since = s.callSince, now.timeIntervalSince(since) < Deferral.callGraceSec { return (s, []) }
         guard track(s, kind).canNudge(now: now) else { return (s, []) }
         return (over(s, kind) { $0.nudged(at: now) }, [.callNudge(kind)])
     }
