@@ -138,6 +138,89 @@ glance; the Obsidian export below is for long-range tracking.
 Render it to a PNG without opening a window over your work:
 `swift run pace --stats-preview /tmp/stats.png`.
 
+## The chain on the card
+
+A break that turns up late looks exactly like a break that turns up on time, and
+that is how putting one off stays invisible. The card now shows the difference:
+where this break was, the one thing that has happened since you last saw it, and
+now.
+
+```
+      ✓         +5 min         👁
+   rested   ──────────────▶   22m late
+```
+
+It is drawn as a **transition**, not a row of beads: putting a break off is
+something that happened *between* two states, not a third state you were in.
+Three coloured discs made it a traffic light. There is no colour in it now at
+all — hierarchy does that work instead. Where you were and what happened are
+quiet, and *now* is the heaviest mark in the row, because now is the only part
+you have to act on.
+
+One step, whatever the run: the card shows the difference since you last saw it,
+not the whole history. A row of seven discs is a chart, and a card you have to
+*read* is a card you skip. The label on the arrow is one of **+5 min**,
+**Skipped**, **Call held it** or **Call cut in** — the loop's own trail, not a
+second record kept alongside it, so `refusals` and `nudges` are counted *off* the
+same list the card draws from and the picture and the numbers cannot disagree.
+Taking the break clears the trail, which is the only thing that does.
+
+The two halves of the card divide the fact cleanly. The chain owns **how late**;
+the sentence under it owns **the run**, and splits what you did from what
+happened to you: *"You've put this one off 3 times and skipped it once since your
+last rest. A call held it back twice and cut it short once."* A call getting in
+the way is on the chain because it is why the break is late, but it never reads
+as a refusal. A break that arrives on time and clean gets neither — there is no
+story to tell, so it isn't handed a diagram of one.
+
+The card is a **state machine in the functional sense**, in `Card.swift`: the
+state is a value, the transition is one total function of `(State, Event)`, and
+everything the card looks like is a pure function of that state. No clock, no
+timers, no `Settings`, no AppKit — the shell reads all of those and hands them in
+as events, the same shape `Scheduler` has around `Loop`.
+
+```swift
+Card.next(State, Event) -> (State, [Effect])
+```
+
+It replaced six `var`s on the controller (`isShowing`, `currentKind`,
+`startedAt`, `durationSec`, two timers) nudged by hand from four places. Nothing
+was wrong with what they did; the problem was that "can a keypress end a card
+that isn't up" could only be answered by reading every method and hoping. It is a
+line in a switch now, and `--selftest` drives every state against every event to
+prove three properties that used to be held by scattered guards: **no event can
+end a break twice**, **with no card up every event is a non-event**, and **a card
+can never outlive its own countdown**, whichever of the two clocks ticks.
+
+The whole state machine, which is what the chain is a walk through:
+
+```mermaid
+graph TD
+  R["RESTED<br/>counter 0, trail empty"] --> C["COUNTING<br/>screen work accrues"]
+  C -->|"past the interval,<br/>past the quiet gap"| D{"DUE"}
+  D -->|"on a call"| H["HELD<br/>nudge only, gap doubles"]
+  H --> C
+  D -->|"not on a call"| S["CARD ON SCREEN"]
+  S -->|"⌘D, or the countdown ends"| K["COMPLETED"]
+  S -->|"+5 min ⌘5 · quiet 5m"| N["mark: snoozed"]
+  S -->|"Skip ⌘S · quiet 10m"| X["mark: skipped"]
+  S -->|"a call starts · quiet 2m"| I["mark: interrupted"]
+  K --> R
+  N --> C
+  X --> C
+  I --> C
+  C -->|"away longer than the reset"| R
+```
+
+Every arrow out of the card except **COMPLETED** leaves a mark and buys quiet,
+never credit: the counter keeps climbing across all of them, so the chain gets
+longer and the menu-bar eye gets worse at the same time.
+
+`swift run pace --break-preview /tmp/card.png snoozed snoozed skipped overdue 22`
+renders the card with any trail you like, offscreen, so you can judge it without
+waiting an hour or having a full-screen window land over your work. Add `move`
+for the movement card and `dark` for dark mode.
+
 ## Putting breaks off
 
 The menu-bar eye already shows a debt as it grows, but it forgets. This panel is
@@ -216,6 +299,7 @@ swift run pace --check            # print mic-in-use / idle / login-item and exi
 swift run pace --check ~/vault    # ...and try a real write into that folder
 swift run pace --sim              # run the whole loop against a fake clock
 swift run pace --stats-preview /tmp/s.png   # render the stats window off sample data
+swift run pace --break-preview /tmp/c.png snoozed skipped overdue 22   # the card, with a trail
 ```
 
 `--check` reports the login item as `n/a` unless you run it from the installed
@@ -304,7 +388,7 @@ configuration.
 - `Sources/pace/Settings.swift` — one typed store over UserDefaults.
 - `Sources/pace/Signals.swift` — mic-in-use (CoreAudio) + idle (IOKit).
 - `Sources/pace/Scheduler.swift` — the 1-second loop, guards, counters.
-- `Sources/pace/BreakOverlay.swift` — the dismissible overlay window.
+- `Sources/pace/BreakOverlay.swift` — the dismissible overlay window, and the chain on it.
 - `Sources/pace/AppDelegate.swift` — status item + menu.
 - `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon.
 - `Sources/pace/Report.swift` — the JSONL log, the debt arithmetic, the Obsidian render.

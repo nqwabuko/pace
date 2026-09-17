@@ -82,10 +82,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             }
             if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
         }
-        scheduler.onBreakDue = { [weak self] kind, refusals in
+        scheduler.onBreakDue = { [weak self] kind, trail in
             guard let self else { return }
             self.scheduler.overlayShowing = true
-            self.overlay.show(kind, refusals: refusals)
+            // The debt reading is the previous tick's: the break fires before this
+            // tick's status goes out, so a second is the worst it can be behind.
+            self.overlay.show(kind, trail: trail, overdueSec: self.lastStatus?.gauge(kind).overdue ?? 0)
         }
         scheduler.onMeetingDuringBreak = { [weak self] in self?.overlay.dismissForMeeting() }
         scheduler.onCallNudge = { [weak self] kind in self?.deliverCallNudge(kind) }

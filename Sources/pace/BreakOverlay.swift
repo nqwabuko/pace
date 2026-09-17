@@ -1,31 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// View-model for one break window. The controller ticks `remaining` down; the
-/// view just renders it.
+/// What the card is showing, as one value the view observes. The model is built
+/// by `Card.model`, so the view never derives anything: it draws what it is
+/// given, and the thing it is given can be checked without a screen.
 final class BreakVM: ObservableObject {
-    let kind: BreakKind
-    let prompt: Prompt
-    let refusals: Int          // times this break has been put off since you last took one
-    @Published var remaining: Int
-    var onSkip: () -> Void = {}
-    var onSnooze: () -> Void = {}
-    var onDone: () -> Void = {}
-    init(kind: BreakKind, remaining: Int, refusals: Int) {
-        self.kind = kind
-        self.remaining = remaining
-        self.refusals = refusals
-        self.prompt = Tips.random(for: kind)
-    }
-
-    /// Said once, plainly, when you've put this one off before. Not a scold: the
-    /// point is that extending is no longer invisible.
-    var debtLine: String? {
-        guard refusals > 0 else { return nil }
-        return refusals == 1
-            ? "You put this one off once already."
-            : "You've put this one off \(refusals) times."
-    }
+    @Published var model: Card.Model
+    var send: (Card.Event) -> Void = { _ in }
+    init(model: Card.Model) { self.model = model }
 }
 
 private struct BreakView: View {
@@ -37,34 +19,43 @@ private struct BreakView: View {
             // hatch that doesn't depend on focus or the countdown timer.
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture { vm.onSkip() }
+                .onTapGesture { vm.send(.clickedOff) }
             card
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var m: Card.Model { vm.model }
+
     private var card: some View {
         VStack(spacing: 22) {
             GooglyEyesView(eyeSize: 52)
                 .frame(height: 60)
-            Text(vm.kind.title)
+            Text(m.title)
                 .font(.system(size: 30, weight: .semibold))
-            if let debt = vm.debtLine {
-                Text(debt)
-                    .font(.system(size: 15, weight: .medium))
-                    .padding(.top, -12)
+            if m.story {
+                VStack(spacing: 12) {
+                    ChainView(model: m)
+                    if let line = m.line {
+                        Text(line)
+                            .font(.system(size: 15, weight: .medium))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, -10)
             }
 
             VStack(spacing: 8) {
-                Text(vm.prompt.line)
+                Text(m.prompt.line)
                     .font(.system(size: 17, weight: .medium))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(vm.prompt.source)
+                Text(m.prompt.source)
                     .font(.system(size: 13))
                     .italic()
                     .foregroundStyle(.secondary)
-                Text(vm.prompt.why)
+                Text(m.prompt.why)
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -75,7 +66,7 @@ private struct BreakView: View {
             .frame(maxWidth: .infinity)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
 
-            Text(clock(vm.remaining))
+            Text(m.clock)
                 .font(.system(size: 46, weight: .light, design: .rounded))
                 .monospacedDigit()
                 .padding(.top, 4)
@@ -86,10 +77,10 @@ private struct BreakView: View {
             // key monitor is ever offered it, so deleting `.cancelAction` would
             // quietly delete Esc.
             HStack(spacing: 12) {
-                Button("Skip  ⌘S") { vm.onSkip() }
+                Button("Skip  ⌘S") { vm.send(.key(.skip)) }
                     .keyboardShortcut(.cancelAction)      // draws it as the escape button
-                Button("+5 min  ⌘5") { vm.onSnooze() }
-                Button("\(vm.kind.doneLabel)  ⌘D") { vm.onDone() }
+                Button("+5 min  ⌘5") { vm.send(.key(.snooze)) }
+                Button("\(m.doneLabel)  ⌘D") { vm.send(.key(.done)) }
                     .keyboardShortcut(.defaultAction)     // draws it as the default button
             }
             .controlSize(.large)
@@ -101,7 +92,6 @@ private struct BreakView: View {
         .shadow(radius: 40)
     }
 
-    private func clock(_ s: Int) -> String { String(format: "%d:%02d", s / 60, s % 60) }
 }
 
 /// A borderless window that can take key focus (needed so Esc/Return work).
@@ -110,37 +100,81 @@ private final class BreakWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-/// Shows exactly one break window at a time. The window is always dismissible
-/// (the buttons, Esc, ⌘S, or a click off the card — the ⌘ keys read by a
-/// monitor, so they don't depend on where focus landed) and always
-/// auto-closes when the countdown ends, so it can never trap the user. It also
-/// bows out if a call starts while it's up.
+/// The shell around `Card`: it owns the window, the two clocks, the key monitor
+/// and the sounds, and it owns no rules at all. Everything that happens arrives
+/// as a `Card.Event`, the machine says what the new state is and what to do, and
+/// this performs it.
+///
+/// The guards that used to be scattered through here — don't stack a second
+/// card, don't dismiss one that isn't up, don't credit a rest twice — are not
+/// guards any more. They are cases in `Card.next`, which is why they can be
+/// checked without a screen.
 final class OverlayController {
+    private var state = Card.State.idle
     private var window: BreakWindow?
     private var vm: BreakVM?
     private var countdown: Timer?
     private var watchdog: Timer?
     private var keyMonitor: Any?
-    private var currentKind: BreakKind?
-    private var startedAt: Date?
-    private var durationSec = 0
-    private(set) var isShowing = false
 
     /// Called with the reason when a break ends (completed / skipped / snoozed /
     /// interrupted).
     var onEnd: ((BreakKind, BreakEndReason) -> Void)?
 
-    func show(_ kind: BreakKind, refusals: Int = 0) {
-        guard !isShowing else { return }
-        isShowing = true
-        currentKind = kind
-        durationSec = kind.durationSec
-        startedAt = Date()
+    var isShowing: Bool { state.session != nil }
 
-        let vm = BreakVM(kind: kind, remaining: durationSec, refusals: refusals)
-        vm.onSkip = { [weak self] in self?.dismiss(.skipped) }
-        vm.onSnooze = { [weak self] in self?.dismiss(.snoozed) }
-        vm.onDone = { [weak self] in self?.dismiss(.completed) }   // already did it: credit + chime
+    func show(_ kind: BreakKind, trail: [Loop.Mark] = [], overdueSec: Int = 0) {
+        // The impure half of opening a card, and all of it is here: the clock, the
+        // preference that sets the length, and the one random draw of the prompt.
+        // From this line on the card is a function of that value.
+        send(.show(Card.Session(
+            kind: kind, trail: trail, overdueSec: overdueSec,
+            durationSec: kind.durationSec, startedAt: Date(), prompt: Tips.random(for: kind))))
+    }
+
+    /// Close the window immediately (used when a call starts mid-break). Logged as
+    /// `interrupted`, not `skipped`: the user didn't refuse anything, so it must
+    /// not read as an ignored break in the stats.
+    func dismissForMeeting() { send(.callStarted) }
+
+    private func send(_ event: Card.Event) {
+        let (next, effects) = Card.next(state, event)
+        state = next
+        for effect in effects { perform(effect) }
+    }
+
+    private func perform(_ effect: Card.Effect) {
+        switch effect {
+        case .startChime:
+            if Settings.bool(.soundEnabled) { NSSound(named: "Tink")?.play() }
+
+        case .endChime:
+            // Gentle "done" chime so you know the break ended with your eyes closed
+            // or mid-stretch. Only on a natural finish, not a skip.
+            if Settings.endChime { NSSound(named: "Glass")?.play() }
+
+        case .open(let session):
+            open(session)
+
+        case .remaining(let seconds):
+            if let s = state.session { vm?.model = Card.model(s, remaining: seconds) }
+
+        case .close:
+            countdown?.invalidate(); countdown = nil
+            watchdog?.invalidate(); watchdog = nil
+            if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+            window?.orderOut(nil)
+            window = nil
+            vm = nil
+
+        case .ended(let kind, let reason):
+            onEnd?(kind, reason)
+        }
+    }
+
+    private func open(_ session: Card.Session) {
+        let vm = BreakVM(model: Card.model(session, remaining: session.durationSec))
+        vm.send = { [weak self] event in self?.send(event) }
         self.vm = vm
 
         let screen = NSScreen.main ?? NSScreen.screens.first!
@@ -156,8 +190,6 @@ final class OverlayController {
         win.setFrame(screen.frame, display: true)
         window = win
 
-        if Settings.bool(.soundEnabled) { NSSound(named: "Tink")?.play() }
-
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
 
@@ -166,62 +198,56 @@ final class OverlayController {
         // button's own shortcut firing the same action a second time.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let action = BreakKey.action(for: event) else { return event }
-            switch action {
-            case .skip:   self?.dismiss(.skipped)
-            case .snooze: self?.dismiss(.snoozed)
-            case .done:   self?.dismiss(.completed)
-            }
+            self?.send(.key(action))
             return nil
         }
 
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.step() }
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.send(.tick(Date())) }
         RunLoop.main.add(t, forMode: .common)
         countdown = t
 
-        // Independent one-shot backstop. A full-screen window that covers the
-        // whole display must never be able to outlive its own countdown, so a
-        // second timer closes it even if the first never fires again.
-        let w = Timer(timeInterval: Double(durationSec) + 5, repeats: false) { [weak self] _ in
-            self?.dismiss(.completed)
+        // Independent one-shot backstop. A full-screen window that covers the whole
+        // display must never be able to outlive its own countdown, so a second
+        // clock ends it even if the first never fires again. It sends `.timeUp`
+        // rather than another `.tick`: a tick is a question about the wall clock,
+        // and a clock that steps backwards would answer "still a minute to run"
+        // and leave the card up. This one is not a question.
+        let w = Timer(timeInterval: Double(session.durationSec) + 5, repeats: false) { [weak self] _ in
+            self?.send(.timeUp)
         }
         RunLoop.main.add(w, forMode: .common)
         watchdog = w
     }
+}
 
-    /// Close the window immediately (used when a call starts mid-break). Logged as
-    /// `interrupted`, not `skipped`: the user didn't refuse anything, so it must
-    /// not read as an ignored break in the stats.
-    func dismissForMeeting() {
-        guard isShowing else { return }
-        dismiss(.interrupted)
-    }
-
-    /// Recompute what's left from the clock rather than counting ticks, so a
-    /// starved run loop or a slept machine can't leave the countdown wrong (or
-    /// stuck) — it just catches up on the next fire.
-    private func step() {
-        guard let vm, let startedAt else { return }
-        let left = Double(durationSec) - Date().timeIntervalSince(startedAt)
-        let whole = Int(left.rounded(.up))
-        if whole != vm.remaining { vm.remaining = max(0, whole) }
-        if left <= 0 { dismiss(.completed) }
-    }
-
-    private func dismiss(_ reason: BreakEndReason) {
-        guard isShowing, let kind = currentKind else { return }
-        isShowing = false
-        countdown?.invalidate(); countdown = nil
-        watchdog?.invalidate(); watchdog = nil
-        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
-        // Gentle "done" chime so you know the break ended with your eyes closed
-        // or mid-stretch. Only on a natural finish, not a skip.
-        if reason == .completed, Settings.endChime { NSSound(named: "Glass")?.play() }
-        window?.orderOut(nil)
-        window = nil
-        vm = nil
-        currentKind = nil
-        startedAt = nil
-        onEnd?(kind, reason)
+/// `pace --break-preview <path> [marks…]`: render the card offscreen to a PNG.
+/// The chain only means anything in the states it moulds to, and the only way to
+/// see those on a real machine is to put off four breaks over an hour — or to
+/// render them. Offscreen deliberately: judging this must not need a full-screen
+/// window landing over whatever you were doing.
+enum BreakPreview {
+    static func write(to path: String, kind: BreakKind, trail: [Loop.Mark], overdueSec: Int,
+                      size: CGSize = CGSize(width: 620, height: 860)) -> Bool {
+        _ = NSApplication.shared
+        let session = Card.Session(
+            kind: kind, trail: trail, overdueSec: overdueSec, durationSec: kind.durationSec,
+            startedAt: Date(), prompt: Tips.random(for: kind))
+        let vm = BreakVM(model: Card.model(session, remaining: session.durationSec))
+        // An opaque desk colour behind the same dim the real window paints, because
+        // `cacheDisplay` has no desktop to blend the card's material against.
+        let root = ZStack {
+            Color(nsColor: .underPageBackgroundColor)
+            Color.black.opacity(0.55)
+            BreakView(vm: vm)
+        }
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return false }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: URL(fileURLWithPath: path))) != nil
     }
 }
 

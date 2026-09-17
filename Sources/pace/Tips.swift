@@ -6,7 +6,7 @@ import Foundation
 /// the "why" lines are grounded in the eye-strain and sitting-physiology
 /// literature. Movement framing follows Katy Bowman's *Move Your DNA* idea that
 /// the body needs a variety of movement, not one more fixed posture.
-struct Prompt {
+struct Prompt: Equatable {
     let line: String        // the principle
     let source: String      // attribution
     let why: String         // the technical / medical sub-line

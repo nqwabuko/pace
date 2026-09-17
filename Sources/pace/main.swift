@@ -78,6 +78,21 @@ if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     exit(ok ? 0 : 1)
 }
 
+// `--break-preview <path> [move] [dark] [overdue <min>] [snoozed|skipped|held|interrupted …]`:
+// render the break card offscreen with a given trail, to judge how the chain
+// reads in each state it moulds to.
+if let i = args.firstIndex(of: "--break-preview"), i + 1 < args.count {
+    Settings.registerDefaults()
+    let rest = Array(args[(i + 2)...])
+    let overdue = rest.firstIndex(of: "overdue").flatMap { $0 + 1 < rest.count ? Int(rest[$0 + 1]) : nil } ?? 0
+    let trail = rest.compactMap { Loop.Mark(rawValue: $0) }
+    if rest.contains("dark") { NSApplication.shared.appearance = NSAppearance(named: .darkAqua) }
+    let ok = BreakPreview.write(to: args[i + 1], kind: rest.contains("move") ? .move : .eye,
+                                trail: trail, overdueSec: overdue * 60)
+    print(ok ? "wrote \(args[i + 1])" : "failed to render")
+    exit(ok ? 0 : 1)
+}
+
 // `--sim ["<script>"]`: drive the scheduler off a fake clock and print the trace.
 // The loop's test harness — see Sim.swift for the script language.
 if let i = args.firstIndex(of: "--sim") {

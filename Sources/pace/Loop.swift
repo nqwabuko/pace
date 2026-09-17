@@ -15,6 +15,20 @@ import Foundation
 /// says so — see `Effect.resumeTick`.
 enum Loop {
 
+    /// One thing that happened to a break that was owed and didn't happen, in the
+    /// order it happened. The card draws this trail, so what you see is the actual
+    /// sequence rather than a tally: two extensions then a skip reads differently
+    /// from a skip then two extensions, and the counts alone can't tell you which.
+    enum Mark: String {
+        case snoozed        // "+5 min"
+        case skipped        // "Skip", Esc, or a click off the card
+        case interrupted    // a call started while the card was up
+        case held           // came due during a call and was nudged instead of shown
+
+        /// Did you choose this? A call getting in the way isn't a refusal.
+        var isRefusal: Bool { self == .snoozed || self == .skipped }
+    }
+
     /// One break type's state. Keeping the counter and its deferral together in
     /// one value is what stops the pair drifting apart when only half of it gets
     /// updated — the bug that used to hand you a free eye rest for snoozing a
@@ -22,14 +36,20 @@ enum Loop {
     struct Track {
         var elapsed: Double = 0     // seconds of screen work since a real rest
         var deferUntil: Date?       // put off: quiet until then, debt still climbing
-        var refusals = 0            // times put off since the last real rest
+        var trail: [Mark] = []      // what's happened to this break since the last real rest
         var lastNudge: Date?        // last on-call nudge; its own gap, not the break's
-        var nudges = 0              // nudges since the last real rest; each buys longer quiet
         var callHeld: Double = 0    // seconds on a call since the last real rest
 
-        mutating func rested() {
-            elapsed = 0; deferUntil = nil; refusals = 0; lastNudge = nil; nudges = 0; callHeld = 0
-        }
+        /// Read off the trail rather than counted alongside it. They used to be two
+        /// `Int`s kept in step by hand, which is the same drift hazard `Track` exists
+        /// to close — and now the card's story and the menu's count are one fact.
+        var refusals: Int { trail.filter(\.isRefusal).count }
+        var nudges: Int { trail.filter { $0 == .held }.count }
+
+        /// A rested track is a new one: nothing survives a real rest, which is the
+        /// whole of the rule and is easier to see as a value than as five
+        /// assignments that have to stay in step.
+        var rested: Track { Track() }
 
         /// A nudge has its own quiet gap so a long call doesn't buzz every second.
         /// Deliberately separate from `deferUntil`: the break is still owed, so
@@ -48,9 +68,30 @@ enum Loop {
             return lastNudge.map { now.timeIntervalSince($0) >= gap } ?? true
         }
 
-        mutating func put(off seconds: TimeInterval, now: Date, refusal: Bool) {
-            deferUntil = now.addingTimeInterval(seconds)
-            if refusal { refusals += 1 }
+        /// Put off: quiet until then, and a mark on the trail saying why. Returns a
+        /// new track rather than editing this one, so a caller can't half-apply it.
+        func putting(off seconds: TimeInterval, now: Date, mark: Mark?) -> Track {
+            var t = self
+            t.deferUntil = now.addingTimeInterval(seconds)
+            if let mark { t.trail.append(mark) }
+            return t
+        }
+
+        /// Quiet for at least this long, with nothing marked. Putting one break off
+        /// buys the other one the same quiet, and that isn't its refusal to carry.
+        func quiet(untilAtLeast floor: Date) -> Track {
+            var t = self
+            if (t.deferUntil ?? .distantPast) < floor { t.deferUntil = floor }
+            return t
+        }
+
+        /// Nudged during a call: the break is still owed, so only the nudge clock
+        /// and the trail move.
+        func nudged(at now: Date) -> Track {
+            var t = self
+            t.lastNudge = now
+            t.trail.append(.held)
+            return t
         }
 
         func isDue(interval: Double, now: Date) -> Bool {
@@ -191,7 +232,7 @@ enum Loop {
     /// that finishes a tick, because today's `defer { emit() }` runs after the
     /// callback that fired the break.
     enum Effect {
-        case breakDue(BreakKind, refusals: Int)
+        case breakDue(BreakKind, trail: [Mark])
         case callNudge(BreakKind)
         case meetingDuringBreak
         case awayRest(cleared: [Gauge], seconds: Int)
@@ -229,29 +270,25 @@ enum Loop {
             // taking it does, so nothing is credited here — and no tick runs, so
             // there is no status reading either.
             guard !overlayShowing else { return (s, []) }
-            return (s, [.breakDue(kind, refusals: refusals(s, kind))])
+            return (s, [.breakDue(kind, trail: trail(s, kind))])
 
         case .breakFinished(let kind, let reason, let now):
             if reason.creditsRest {
-                credit(&s, kind)
+                s = credited(s, kind)
             } else {
-                withTrack(&s, kind) { $0.put(off: reason.deferSec, now: now, refusal: reason.isRefusal) }
+                s = over(s, kind) { $0.putting(off: reason.deferSec, now: now, mark: reason.mark) }
                 // Putting one break off quiets the other one too, for at least as long.
                 // "+5 min" means "leave me alone for five minutes", not "leave this one
                 // counter alone" — without this, snoozing a movement break can pop an
                 // eye break in the same breath. It buys quiet only: the other counter
                 // keeps climbing and it isn't recorded as a refusal, because it wasn't.
                 let other: BreakKind = kind == .eye ? .move : .eye
-                withTrack(&s, other) {
-                    let floor = now.addingTimeInterval(reason.deferSec)
-                    if ($0.deferUntil ?? now) < floor { $0.deferUntil = floor }
-                }
+                s = over(s, other) { $0.quiet(untilAtLeast: now.addingTimeInterval(reason.deferSec)) }
             }
             return (s, [])
 
         case .resumeTick(let t, let onCall):
-            let fx = tickTail(&s, t, onCall: onCall)
-            return (s, fx)
+            return tickTail(s, t, onCall: onCall)
 
         case .tick(let t):
             var fx: [Effect] = []
@@ -275,7 +312,8 @@ enum Loop {
             // were.
             if present {
                 if t.config.idleAware, let since = s.lastPresence {
-                    fx += creditAway(&s, seconds: Int(t.now.timeIntervalSince(since)), t.config)
+                    let credited = creditAway(s, seconds: Int(t.now.timeIntervalSince(since)), t.config)
+                    s = credited.0; fx += credited.1
                 }
                 s.lastPresence = t.now
             }
@@ -327,8 +365,8 @@ enum Loop {
                 }
             }
 
-            fx += tickTail(&s, t, onCall: onCall)
-            return (s, fx)
+            let (after, tail) = tickTail(s, t, onCall: onCall)
+            return (after, fx + tail)
         }
     }
 
@@ -338,13 +376,14 @@ enum Loop {
     ///
     /// `onCall` is carried in rather than recomputed, because the original read
     /// it once at the top of the tick and used that value for the whole of it.
-    private static func tickTail(_ s: inout State, _ t: Tick, onCall: Bool) -> [Effect] {
+    private static func tickTail(_ s: State, _ t: Tick, onCall: Bool) -> (State, [Effect]) {
+        var s = s
         var fx: [Effect] = []
         let present = t.idle < 2
 
         if onCall, !t.config.callBreaks {
             fx.append(.status(status(s, t.config, now: t.now, meeting: onCall, away: false)))
-            return fx
+            return (s, fx)
         }
 
         // Away: the screen is locked, or nobody has touched the machine for long
@@ -364,20 +403,21 @@ enum Loop {
         // is not.
         if s.screenLocked || t.idle >= Double(t.config.awayResetSec) {
             fx.append(.status(status(s, t.config, now: t.now, meeting: onCall, away: true)))
-            return fx
+            return (s, fx)
         }
 
         if t.overlayShowing {
             fx.append(.status(status(s, t.config, now: t.now, meeting: onCall, away: false)))
-            return fx
+            return (s, fx)
         }
 
         // A typed one-off break fires first, once its time arrives.
         if let p = s.pending, t.now >= p.date {
             s.pending = nil
-            fx += fire(&s, p.kind, onCall: onCall, now: t.now, t.config)
+            let fired = fire(s, p.kind, onCall: onCall, now: t.now, t.config)
+            s = fired.0; fx += fired.1
             fx.append(.status(status(s, t.config, now: t.now, meeting: onCall, away: false)))
-            return fx
+            return (s, fx)
         }
 
         s.eye.elapsed += t.delta
@@ -391,16 +431,19 @@ enum Loop {
         if present { s.presentDebt = gauges(s, t.config) }
 
         if t.config.moveEnabled, s.move.isDue(interval: Double(t.config.moveIntervalSec), now: t.now) {
-            fx += fire(&s, .move, onCall: onCall, now: t.now, t.config)
+            let fired = fire(s, .move, onCall: onCall, now: t.now, t.config)
+            s = fired.0; fx += fired.1
         } else if t.config.eyeEnabled, s.eye.isDue(interval: Double(t.config.eyeIntervalSec), now: t.now) {
-            fx += fire(&s, .eye, onCall: onCall, now: t.now, t.config)
+            let fired = fire(s, .eye, onCall: onCall, now: t.now, t.config)
+            s = fired.0; fx += fired.1
         }
 
         fx.append(.status(status(s, t.config, now: t.now, meeting: onCall, away: false)))
-        return fx
+        return (s, fx)
     }
 
     // MARK: pure helpers
+
 
     /// Something that isn't a break rested you: a long enough lock, a long enough
     /// spell with nobody at the machine, or the machine asleep. One door for all
@@ -409,45 +452,49 @@ enum Loop {
     ///
     /// Short spells credit nothing: five minutes away is not a rest, and the
     /// counter should still be where you left it.
-    static func creditAway(_ s: inout State, seconds: Int, _ c: Config) -> [Effect] {
-        guard seconds >= c.awayResetSec else { return [] }
-        guard s.eye.elapsed > 0 || s.move.elapsed > 0 else { return [] }   // already rested; don't log it twice
+    static func creditAway(_ s: State, seconds: Int, _ c: Config) -> (State, [Effect]) {
+        guard seconds >= c.awayResetSec else { return (s, []) }
+        guard s.eye.elapsed > 0 || s.move.elapsed > 0 else { return (s, []) }   // already rested; don't log it twice
+        var s = s
         let cleared = s.presentDebt
-        s.eye.rested()
-        s.move.rested()
+        s.eye = s.eye.rested
+        s.move = s.move.rested
         s.presentDebt = gauges(s, c)
-        return [.awayRest(cleared: cleared, seconds: seconds)]
+        return (s, [.awayRest(cleared: cleared, seconds: seconds)])
     }
 
     /// Deliver a due break: a gentle nudge while on a call (on-call nudges on),
     /// otherwise the full overlay. Nothing is credited either way — showing you a
     /// break is not resting, so the counter keeps climbing through a whole call.
-    static func fire(_ s: inout State, _ kind: BreakKind, onCall: Bool, now: Date, _ c: Config) -> [Effect] {
-        guard onCall else { return [.breakDue(kind, refusals: refusals(s, kind))] }
-        var nudge = false
-        withTrack(&s, kind) {
-            guard $0.canNudge(now: now) else { return }
-            $0.lastNudge = now
-            $0.nudges += 1
-            nudge = true
-        }
-        return nudge ? [.callNudge(kind)] : []
+    static func fire(_ s: State, _ kind: BreakKind, onCall: Bool, now: Date, _ c: Config) -> (State, [Effect]) {
+        guard onCall else { return (s, [.breakDue(kind, trail: trail(s, kind))]) }
+        guard track(s, kind).canNudge(now: now) else { return (s, []) }
+        return (over(s, kind) { $0.nudged(at: now) }, [.callNudge(kind)])
     }
 
     /// Credit a real rest. A movement break rests the eyes too, so it clears
     /// both — but only ever for a break that was actually taken.
-    static func credit(_ s: inout State, _ kind: BreakKind) {
-        if kind == .move { s.move.rested(); s.eye.rested() }
-        else { s.eye.rested() }
+    static func credited(_ s: State, _ kind: BreakKind) -> State {
+        var s = s
+        s.eye = s.eye.rested
+        if kind == .move { s.move = s.move.rested }
+        return s
     }
 
-    static func withTrack(_ s: inout State, _ kind: BreakKind, _ body: (inout Track) -> Void) {
-        if kind == .eye { body(&s.eye) } else { body(&s.move) }
+    /// Put one track through a function and give back the state that results. The
+    /// one door to a track, so "which of the two is this" is answered in a single
+    /// place and a transform can't be applied to half of a pair.
+    static func over(_ s: State, _ kind: BreakKind, _ f: (Track) -> Track) -> State {
+        var s = s
+        if kind == .eye { s.eye = f(s.eye) } else { s.move = f(s.move) }
+        return s
     }
 
-    static func refusals(_ s: State, _ kind: BreakKind) -> Int {
-        kind == .eye ? s.eye.refusals : s.move.refusals
+    static func track(_ s: State, _ kind: BreakKind) -> Track {
+        kind == .eye ? s.eye : s.move
     }
+
+    static func trail(_ s: State, _ kind: BreakKind) -> [Mark] { track(s, kind).trail }
 
     static func status(_ s: State, _ c: Config, now: Date, meeting: Bool, away: Bool) -> Status {
         Status(

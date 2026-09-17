@@ -39,9 +39,17 @@ enum BreakEndReason {
         }
     }
 
-    /// Does this count against you as "putting it off"? A call interrupting a
-    /// break doesn't; choosing to extend or skip does.
-    var isRefusal: Bool { self == .snoozed || self == .skipped }
+    /// What this leaves on the break's trail, and so on the card next time. A
+    /// completed break leaves nothing, because there is no trail left to leave it
+    /// on — it has just been cleared.
+    var mark: Loop.Mark? {
+        switch self {
+        case .completed:   return nil
+        case .snoozed:     return .snoozed
+        case .skipped:     return .skipped
+        case .interrupted: return .interrupted
+        }
+    }
 }
 
 /// What putting a break off costs. The answer is: only time, never credit. The
@@ -101,7 +109,7 @@ final class Scheduler {
     var overlayShowing = false
 
     var onTick: ((Status) -> Void)?
-    var onBreakDue: ((BreakKind, Int) -> Void)?   // kind, times it's already been put off
+    var onBreakDue: ((BreakKind, [Loop.Mark]) -> Void)?   // kind, and what's already happened to it
     var onMeetingDuringBreak: (() -> Void)?   // a call started while a break is up
     var onCallNudge: ((BreakKind) -> Void)?   // a due break during a call (on-call nudges on)
 
@@ -247,7 +255,7 @@ final class Scheduler {
         var pending: (tick: Loop.Tick, onCall: Bool)?
         for e in effects {
             switch e {
-            case .breakDue(let kind, let refusals): onBreakDue?(kind, refusals)
+            case .breakDue(let kind, let trail):    onBreakDue?(kind, trail)
             case .callNudge(let kind):              onCallNudge?(kind)
             case .meetingDuringBreak:               onMeetingDuringBreak?()
             case .awayRest(let cleared, let secs):  onAwayRest?(cleared, secs)

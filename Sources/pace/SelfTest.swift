@@ -99,6 +99,113 @@ enum SelfTest {
         check("four extensions are all counted", "refusals=\(loop.refusals)", loop.refusals == 4)
         check("taking it finally rests you", String(format: "%.2f", loop.afterTaking), loop.afterTaking == 0)
 
+        print("\ncard — the chain on the break card must be the loop's own trail, in order")
+        check("the card is handed what actually happened, in order",
+              loop.trail.map(\.rawValue).joined(separator: " → "),
+              loop.trail == [.snoozed, .snoozed, .snoozed, .snoozed])
+        let story = trailStory()
+        check("an extension, an extension, a skip stay in that order",
+              story.handed.map(\.rawValue).joined(separator: " → "),
+              story.handed == [.snoozed, .snoozed, .skipped])
+        check("taking the break clears the story", "\(story.afterTaking.count) marks left", story.afterTaking.isEmpty)
+        // The one distinction the chain exists to keep: a call getting in the way is
+        // on the trail (it is why the break is late) but is not something you did,
+        // so it must never read as a refusal in the counts or in the copy.
+        check("a call holding a break back is on the trail but is not a refusal",
+              "trail=\(story.callTrail.map(\.rawValue).joined(separator: ",")) refusals=\(story.callRefusals)",
+              story.callTrail == [.held] && story.callRefusals == 0)
+        check("the line under the chain says what happened, not just how often",
+              story.line, story.line ==
+                "You've put this one off twice and skipped it once since your last rest.")
+        check("a call-held break is not blamed on you", story.callLine,
+              story.callLine == "A call held it back once.")
+        check("a break that turns up on time gets no chain and no line", story.cleanLine ?? "(nothing)",
+              story.cleanLine == nil)
+
+        print("\nthe card machine — every state must take every event, and only one path may end a break")
+        let start = Date(timeIntervalSince1970: 1_755_000_000)
+        let session = Card.Session(kind: .eye, trail: [.snoozed], overdueSec: 300, durationSec: 20,
+                                   startedAt: start, prompt: Tips.random(for: .eye))
+        let states: [Card.State] = [.idle, .up(session, remaining: 20), .up(session, remaining: 1)]
+        let events: [Card.Event] = [
+            .show(session), .key(.skip), .key(.snooze), .key(.done), .clickedOff,
+            .tick(start.addingTimeInterval(1)), .tick(start.addingTimeInterval(19.6)),
+            .tick(start.addingTimeInterval(20)), .tick(start.addingTimeInterval(9_999)), .callStarted]
+
+        // Totality. Not "it compiles": every pair is actually driven, and the one
+        // thing no pair may ever do is report a break finished more than once — that
+        // is what would credit a rest twice or log the same break as taken and
+        // skipped. The old code held this with `guard isShowing` in two methods.
+        var endings = 0
+        var badIdle: [String] = []
+        for st in states {
+            for ev in events {
+                let (after, fx) = Card.next(st, ev)
+                endings = max(endings, fx.filter { if case .ended = $0 { return true }; return false }.count)
+                if case .idle = st, case .show = ev {} else if case .idle = st, !fx.isEmpty || after != .idle {
+                    badIdle.append("\(ev)")
+                }
+            }
+        }
+        check("no event ends a break twice", "\(endings) ended per step", endings == 1)
+        check("with no card up, everything but showing one is a non-event",
+              badIdle.joined(separator: ", "), badIdle.isEmpty)
+
+        func ending(_ ev: Card.Event) -> BreakEndReason? {
+            let (after, fx) = Card.next(.up(session, remaining: 20), ev)
+            guard after == .idle else { return nil }
+            for f in fx { if case .ended(_, let reason) = f { return reason } }
+            return nil
+        }
+        check("Skip and a click off the card are the same refusal", "",
+              ending(.key(.skip)) == .skipped && ending(.clickedOff) == .skipped)
+        check("+5 is snoozed, already-rested is completed, a call is interrupted", "",
+              ending(.key(.snooze)) == .snoozed && ending(.key(.done)) == .completed
+              && ending(.callStarted) == .interrupted)
+        check("only a natural finish asks for the chime", "",
+              Card.next(.up(session, remaining: 1), .tick(start.addingTimeInterval(20))).1.contains(.endChime)
+              && !Card.next(.up(session, remaining: 20), .key(.skip)).1.contains(.endChime))
+
+        // The guarantee the second timer exists for, stated as a property rather
+        // than as a timer: any tick at or past the end closes the card, whichever
+        // clock sent it and whatever the card last painted.
+        let outlives = states.compactMap { st -> String? in
+            guard case .up = st else { return nil }
+            let (after, _) = Card.next(st, .tick(start.addingTimeInterval(25)))
+            return after == .idle ? nil : "\(st)"
+        }
+        check("a card can never outlive its own countdown", outlives.joined(separator: ", "), outlives.isEmpty)
+        check("a tick that doesn't change the clock repaints nothing", "",
+              Card.next(.up(session, remaining: 19), .tick(start.addingTimeInterval(1))).1.isEmpty)
+
+        // A backstop that asks the clock is only a backstop while the clock runs
+        // forwards. This is the one event that ends a card because it was asked
+        // to, and the check is that it does so from any state and any reading.
+        check("the backstop ends the card whatever the clock says", "",
+              states.allSatisfy { st in
+                  guard case .up = st else { return true }
+                  return Card.next(st, .timeUp).0 == .idle
+              })
+
+        print("\nthe card's copy — what is drawn is a function of the trail, and nothing else")
+        func card(_ trail: [Loop.Mark], overdue: Int) -> Card.Model {
+            Card.model(Card.Session(kind: .eye, trail: trail, overdueSec: overdue, durationSec: 20,
+                                    startedAt: start, prompt: Tips.random(for: .eye)), remaining: 20)
+        }
+        let long: [Loop.Mark] = [.snoozed, .snoozed, .held, .skipped, .snoozed, .interrupted, .held]
+        // The card shows the difference, not the chart: where you were, the one
+        // thing that has happened since, and now. However long the run gets, the
+        // arrow carries one step, and it is the most recent one.
+        check("the step is the last thing that happened, however long the run",
+              "\(long.count) marks → \(card(long, overdue: 0).step.map(\.rawValue) ?? "none")",
+              card(long, overdue: 0).step == .held
+              && card([.snoozed, .skipped], overdue: 0).step == .skipped)
+        check("how late it is belongs to the chain, not the sentence",
+              card(long, overdue: 22 * 60).late ?? "(nothing)",
+              card(long, overdue: 22 * 60).late == "22m late" && card(long, overdue: 30).late == nil)
+        check("a break with no story draws nothing at all", "",
+              !card([], overdue: 0).story && card([], overdue: 300).story && card([.snoozed], overdue: 0).story)
+
         print("\ndebt — extensions and the time they cost must both survive the log")
         let legacy = decodeLegacyLine()
         check("a line written before overdue/refusals/call time existed still decodes",
@@ -514,7 +621,7 @@ enum SelfTest {
     /// Drive the real scheduler through the reported bug: a break put off four
     /// times, then taken. Built inline rather than through `--sim`'s parser so this
     /// check can't be broken by the parser.
-    private static func extendFourTimes() -> (strains: [Double], refusals: Int, afterTaking: Double) {
+    private static func extendFourTimes() -> (strains: [Double], refusals: Int, trail: [Loop.Mark], afterTaking: Double) {
         let suite = "global.ampeco.pace.selftest"
         UserDefaults.standard.removePersistentDomain(forName: suite)
         let store = UserDefaults(suiteName: suite) ?? .standard
@@ -535,8 +642,9 @@ enum SelfTest {
 
         var due: BreakKind?
         var last: Scheduler.Status?
+        var handed: [Loop.Mark] = []
         sched.onTick = { last = $0 }
-        sched.onBreakDue = { kind, _ in due = kind; sched.overlayShowing = true }
+        sched.onBreakDue = { kind, trail in due = kind; handed = trail; sched.overlayShowing = true }
         sched.start()
 
         var strains: [Double] = []
@@ -562,7 +670,42 @@ enum SelfTest {
         }
         let refusals = last?.eye.refusals ?? 0
         workFor(5 * 60)
+        let trail = handed          // what the fifth card was handed: four extensions
         resolve(.completed)
-        return (strains, refusals, last?.eye.strain ?? -1)
+        return (strains, refusals, trail, last?.eye.strain ?? -1)
     }
+
+    /// The break card's story, straight off the pure loop: what a trail looks like
+    /// after two extensions and a skip, what a call leaves on it instead, and the
+    /// sentence the card writes under the chain in each case.
+    private static func trailStory()
+        -> (handed: [Loop.Mark], afterTaking: [Loop.Mark], callTrail: [Loop.Mark],
+            callRefusals: Int, line: String, callLine: String, cleanLine: String?) {
+        let now = Date(timeIntervalSince1970: 1_755_000_000)
+        var s = Loop.State()
+        for reason in [BreakEndReason.snoozed, .snoozed, .skipped] {
+            (s, _) = Loop.step(s, .breakFinished(.eye, reason, now: now))
+        }
+        let handed = Loop.trail(s, .eye)
+        var rested = Loop.State()
+        (rested, _) = Loop.step(s, .breakFinished(.eye, .completed, now: now))
+
+        let onCall = Loop.fire(Loop.State(), .eye, onCall: true, now: now, callConfig).0
+
+        func line(_ trail: [Loop.Mark], overdue: Int) -> String? {
+            _ = overdue
+            return Card.line(trail: trail)
+        }
+        return (handed, Loop.trail(rested, .eye), Loop.trail(onCall, .eye),
+                onCall.eye.refusals,
+                line(handed, overdue: 600) ?? "(nothing)",
+                line(Loop.trail(onCall, .eye), overdue: 0) ?? "(nothing)",
+                line([], overdue: 0))
+    }
+
+    /// On a call, with on-call nudges on: the one configuration that marks a trail
+    /// without the user touching anything.
+    private static let callConfig = Loop.Config(
+        eyeEnabled: true, moveEnabled: true, eyeIntervalSec: 20 * 60, moveIntervalSec: 45 * 60,
+        meetingAware: true, callBreaks: true, idleAware: true, awayResetSec: 15 * 60)
 }
