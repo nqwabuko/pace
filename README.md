@@ -73,33 +73,53 @@ Then open the menu and turn on **Start at login**.
 
 ## The icon is the gauge
 
-The menu-bar eye shows how long your eyes have been working, and it does not lie
-to make you feel better.
+A figure sitting at a desk. **Posture is the movement gauge, the head is the eye
+gauge**, and the two never borrow each other's channel.
 
-- **Just rested** — a light open ring with a small pupil sitting low, loose the
-  way a googly eye settles.
-- **Working** — the pupil dilates and rises.
-- **Break due** — a bold pupil with a ring of white still showing around it.
-- **Overdue** — the pupil floods the eye solid, and the whole eye swells and
-  settles lower the longer you hold out. **Hollow means you're fine, solid means
-  you're behind.**
+- **Posture** — sitting up when you've moved recently, hunching further forward
+  the longer you stay put. The lower back stays upright and the upper back does
+  the bending, which is what makes it read as slumping rather than toppling.
+- **The head** — green when your eyes are rested, running through yellow and
+  orange to red as the break comes due and goes past due. Breaks you skipped push
+  it further along the same ramp, because a refusal is time you still owe.
+- **On a call** the figure sits smaller with a rule beneath it: the break is held,
+  not refused. The glance-away nudge sits the figure up straight.
+- **Paused** is the figure with a slash through it, and it reads as rested.
 
-One rule holds the whole thing together: **the glyph only ever gets heavier.**
-Never thinner, never smaller. A hairline reads as "off" at menu-bar size, so an
-icon that quietened down as you fell further behind would be worse than no icon.
-That's measured, not eyeballed — see `--selftest` below. (An earlier version
-squinted the eye shut when overdue, which shrank it by a quarter. Exactly
-backwards, and only the measurement caught it.)
+One rule holds it together: **you cannot have a gauge you cannot see.** Every step
+the app is capable of drawing has to change enough pixels, at the size the menu bar
+actually renders, for a person to notice. That is measured, not asserted — see
+`--selftest` — and the step sizes are derived from it rather than picked. The eye
+moves in half-intervals because a 10px disc cannot resolve a colour ramp finer than
+that; movement moves in quarters because the lean has the whole glyph to work in.
 
-Because the counter behind it only resets on a break you actually took, extending
-the same break over and over walks the eye further and further into the solid
-range instead of snapping it back to rested.
+The design this replaced was an eye whose pupil dilated and flooded, with movement
+pressed into it as a footprint. It passed every check it had and was still wrong:
+the footprint's range was bounded by the pupil, and the pupil is smallest exactly
+when the eye is rested, so movement was invisible until the eye was already
+shouting. Stepping the movement gauge through its whole range changed **two pixels
+of 1296**. Every monotonicity assertion stayed green throughout. That is why the
+gate here is perceptibility and not monotonicity.
 
-Render the whole sequence to look at it:
+### Colour, and doing without it
+
+Colour is a channel pace is allowed to use, not one it is owed. Putting the eye
+gauge on hue means the icon is no longer a template image, so light and dark menu
+bars and the inversion under an open menu are all handled in-app rather than by
+macOS. That cost is paid in one place: `Appearance` is read once at the edge and
+everything downstream is a pure function of it, which is what lets `--selftest`
+walk all sixteen combinations instead of waiting to hear about the broken one.
+
+Turn on **Differentiate without colour** in System Settings and the head becomes a
+ring that fills and grows instead — the monochrome language the glyph used before
+colour existed. That path is gated by the same perceptibility check as the colour
+one, so it is a real fallback rather than a gesture.
+
+Render the whole thing to look at it:
 
 ```sh
-./.build/debug/pace --make-strainstrip strip.png                    # add `dark` for a dark bar
-./.build/debug/pace --make-strainstrip strip.png dark stages 0 1 1.5 2
+./.build/debug/pace --make-damagestrip strip.png          # add `dark` for a dark bar
+./.build/debug/pace --make-menuicon one.png strain 1.5 move 2 missed 2
 ```
 
 ## Quick entry (Horo-style)
@@ -320,12 +340,15 @@ things the design would quietly break if a constant were nudged, and exits
 non-zero, so it works as a gate:
 
 ```
-glyph — the icon must never look calmer the more rest you owe
-  ok   ink only ever increases
-  ok   solidity never falls
-  ok   hollow when rested   0.57
-  ok   white still showing when due   0.82
-  ok   solid once overdue (by 1.5)   1.00
+glyph — a gauge you cannot see is not a gauge
+  ok   every posture step is visible at 36px   worst 13 px at move 0.00→0.25
+  ok   every eye step is visible at 36px   worst 46 px at eye 1.00→1.50
+  ok   …and still visible with colour switched off   worst 29 px at eye 1.00→1.50
+  ok   movement never touches the eye's tone
+  ok   the eye never moves the body
+  ok   the lean only ever increases   9° → 46°
+  ok   the glyph never leaves its 18pt box
+  ok   all 16 appearance combinations draw a glyph
 
 loop — extending a break must never credit a rest
   ok   counter keeps climbing through 4 extensions   1.00 → 2.00 → 3.00 → 4.00
@@ -345,7 +368,7 @@ vault health — a broken vault must read as broken, then heal
   ok   a success clears it
 ```
 
-Add `verbose` to print the measured ink/solidity curve, which is what you want
+Add `verbose` to print the measured ink and colour-ramp curve, which is what you want
 when tuning any of the glyph constants.
 
 ### `--sim`: the loop's test harness
@@ -390,7 +413,9 @@ configuration.
 - `Sources/pace/Scheduler.swift` — the 1-second loop, guards, counters.
 - `Sources/pace/BreakOverlay.swift` — the dismissible overlay window, and the chain on it.
 - `Sources/pace/AppDelegate.swift` — status item + menu.
-- `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon.
+- `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon. Two halves with a
+  hard seam: pure derivations (state → numbers → a list of marks) above, and one
+  twenty-line interpreter that is the only thing in it that draws.
 - `Sources/pace/Report.swift` — the JSONL log, the debt arithmetic, the Obsidian render.
 - `Sources/pace/StatsView.swift` — the stats window, including the put-off panel.
 - `Sources/pace/Sim.swift` — the fake-clock harness behind `--sim`.

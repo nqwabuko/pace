@@ -19,13 +19,19 @@ if let i = args.firstIndex(of: "--parse") {
     exit(0)
 }
 
-// `--make-menuicon <path> [paused] [dark] [nudge] [call] [foot] [cracks <0…3>] [strain <0…2>]`:
-// render the menu-bar glyph big for review.
+// `--make-menuicon <path> [paused] [dark] [nudge] [call] [cracks <0…3>] [strain <0…2>] [move <0…2>]`:
+// render the menu-bar glyph big for review. `move` is the movement gauge: leave it
+// out and movement is not tracked, which is its own reading and draws no figure.
+// (It replaces the old `foot` keyword, which could only say missed / not missed.)
 if let i = args.firstIndex(of: "--make-menuicon") {
     let out = i + 1 < args.count ? args[i + 1] : "menuicon.png"
     let strain = args.firstIndex(of: "strain").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } ?? 0
-    let cracks = args.firstIndex(of: "cracks").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 0
-    exit(IconMaker.writeMenuIconPreview(to: out, paused: args.contains("paused"), dark: args.contains("dark"), nudge: args.contains("nudge"), strain: CGFloat(strain), cracks: cracks, foot: args.contains("foot"), onCall: args.contains("call")) ? 0 : 1)
+    let move = args.firstIndex(of: "move").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil }
+    let missed = args.firstIndex(of: "missed").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 0
+    let state = IconMaker.GlyphState(eye: CGFloat(strain), move: move.map { CGFloat($0) }, missed: missed,
+                                     onCall: args.contains("call"), paused: args.contains("paused"),
+                                     nudge: args.contains("nudge"))
+    exit(IconMaker.writeMenuIconPreview(to: out, state: state, dark: args.contains("dark")) ? 0 : 1)
 }
 
 // `--make-damagestrip <path> [dark]`: render every damage state against every

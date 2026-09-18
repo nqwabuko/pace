@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var statsWindow: NSWindow?
     private var feedbackWindow: NSWindow?
     private var nudgeUntil: Date?
-    private var iconKey: String?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
+    private var lastAppearance: IconMaker.Appearance?
+    private var lastGlyph: IconMaker.GlyphState?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
     private var lastStatus: Scheduler.Status?   // latest tick, so a closing break can log what it owed
     private let notificationsAvailable = Bundle.main.bundleURL.pathExtension == "app"
 
@@ -38,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = IconMaker.statusImage(paused: false)
+            button.image = IconMaker.statusImage(.rested)
             button.target = self
             button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -274,25 +275,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func render(_ s: Scheduler.Status) {
         lastStatus = s
         let nudging = (nudgeUntil.map { $0 > Date() } ?? false) && !s.paused
-        // The pupil widens over the eye interval, and past due the lid keeps
-        // closing and the eye sags — so putting a break off again and again is
-        // visible on the bar instead of free. The strain comes straight from the
-        // scheduler's counter (seconds since your eyes actually rested), which is
-        // why extending no longer snaps the icon back to rested.
-        let strain = min(2.0, max(0, s.eye.strain))
-        let step = Int((strain * 12).rounded())   // 24 steps over 0…2: a 1s tick only redraws on a visible change
-        // Damage: what was owed and didn't happen. The eye's misses crack the rim,
-        // a missed movement break presses a foot into the pupil — the one thing the
-        // move gauge has ever had on the bar. Both outlive the call that held them,
-        // so a call ending doesn't quietly wipe the debt off the icon.
-        let cracks = min(IconMaker.maxCracks, s.eye.missed)
-        let foot = s.move.enabled && s.move.missed > 0
-        let key = "\(s.paused)-\(nudging)-\(step)-\(cracks)-\(foot)-\(s.meeting)"
-        if key != iconKey {
-            iconKey = key
-            statusItem.button?.image = IconMaker.statusImage(
-                paused: s.paused, nudge: nudging, strain: CGFloat(step) / 12,
-                cracks: cracks, foot: foot, onCall: s.meeting)
+        // Both gauges go on the bar, and both come straight from the scheduler's
+        // counters (seconds since that break was actually taken), which is why
+        // extending no longer snaps the icon back to rested. Posture is the movement
+        // gauge and the head's colour is the eye gauge. Movement used to be one bool
+        // here (`missed > 0`) and `move.strain` was computed every tick and thrown
+        // away — half the app invisible on the bar.
+        //
+        // The step sizes are not taste. They are the finest steps that are actually
+        // VISIBLE at 36px, measured: half an interval for the eye (a ~10px disc
+        // cannot resolve a hue ramp finer than that) and a quarter for movement,
+        // where the lean has the whole glyph to work in. Quantising finer would
+        // repaint the bar to show the user nothing, which is the exact failure the
+        // gauge before this one shipped with. `--selftest` gates both.
+        let st = IconMaker.GlyphState(
+            eye: IconMaker.quantised(s.eye.strain, steps: 2),
+            move: s.move.enabled ? IconMaker.quantised(s.move.strain, steps: 4) : nil,
+            // Eye rests owed that didn't happen. They push the head further along
+            // the same ramp as the time itself rather than getting a mark of their
+            // own, because a refusal is time you still owe. It outlives the call
+            // that held it, so a call ending doesn't wipe the debt off the icon.
+            missed: min(IconMaker.maxMissed, s.eye.missed),
+            onCall: s.meeting, paused: s.paused, nudge: nudging)
+        // The redraw key is the pair of values the image is a function of, compared
+        // by struct equality. It used to be a hand-built string, which meant adding
+        // a field and forgetting this line was a silent stop-repainting bug.
+        let ap = IconMaker.Appearance.current(statusItem.button)
+        if st != lastGlyph || ap != lastAppearance {
+            lastGlyph = st
+            lastAppearance = ap
+            statusItem.button?.image = IconMaker.statusImage(st, ap)
         }
 
         let summary: String

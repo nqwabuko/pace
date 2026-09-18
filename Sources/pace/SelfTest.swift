@@ -15,81 +15,170 @@ enum SelfTest {
             if !ok { failures += 1 }
         }
 
-        print("\nglyph — the icon must never look calmer the more rest you owe")
+        print("\nglyph — a gauge you cannot see is not a gauge")
+        // The design this replaced passed every monotonicity check while being
+        // invisible: ink rose smoothly across the movement axis and not one pixel of
+        // the 1296 changed at the size the bar renders. Monotone and perceptible are
+        // different claims. These gate the second one, in pixels, at 36px.
+        let mono = IconMaker.Appearance(differentiateWithoutColor: true)
+        let plain = IconMaker.Appearance.standard
+        // The app's own redraw quantisation, not a finer grid: if a step the app can
+        // actually produce is invisible, the icon repaints and the user sees nothing.
+        // Exactly the quantisation AppDelegate ships, so the claim these prove is
+        // the strong one: every redraw the app can produce is a change a person can
+        // see. Finer steps are not a better gauge, they are a repaint that shows
+        // nothing — which is how the previous design passed every check while being
+        // invisible.
+        let eyeSteps = stride(from: 0.0, through: 2.0, by: 0.5).map { CGFloat($0) }
+        let moveSteps = stride(from: 0.0, through: 2.0, by: 0.25).map { CGFloat($0) }
+        let floor = 12   // of 1296 px. The design that failed bottomed out at 2.
+
         if dumpCurve {
-            for m in stride(from: 0.0, through: 2.0, by: 0.25).map({ IconMaker.measure(strain: CGFloat($0)) }) {
-                print(String(format: "    strain %.2f  ink %6.1f  silhouette %6.1f  solidity %.3f",
-                             m.strain, m.ink, m.silhouette, m.solidity))
+            for e in stride(from: 0.0, through: 2.0, by: 0.25) {
+                let m = IconMaker.measure(.init(eye: CGFloat(e)))
+                print(String(format: "    eye %.2f  ink %6.1f  tone %@", e, m.ink,
+                             String(describing: IconMaker.headTone(IconMaker.strain(CGFloat(e), paused: false),
+                                                                   missed: 0, plain))))
             }
         }
-        let steps = stride(from: 0.0, through: 2.0, by: 0.1).map { CGFloat($0) }
-        let ms = steps.map { IconMaker.measure(strain: $0) }
-        let rested = ms[0]
 
-        // The strong form of the claim, and the one an earlier version of the
-        // geometry failed: total ink only ever goes up. Squinting the eye shut when
-        // overdue shrank it by a quarter, so the icon got quieter the more rest you
-        // owed. Overdue swells now, and this is what holds that in place.
-        let lighter = zip(ms, ms.dropFirst())
-            .filter { $1.ink <= $0.ink }
-            .map { String(format: "%.1f→%.1f (%.0f→%.0f)", $0.strain, $1.strain, $0.ink, $1.ink) }
-        check("ink only ever increases", lighter.joined(separator: ", "), lighter.isEmpty)
+        func worstStep(_ states: [IconMaker.GlyphState], _ ap: IconMaker.Appearance) -> (Int, String) {
+            var worst = Int.max, where_ = ""
+            for (x, y) in zip(states, states.dropFirst()) {
+                let d = IconMaker.visibleDelta(x, y, ap)
+                if d < worst {
+                    worst = d
+                    // name the axis that actually moved, or the label lies about
+                    // which step was the weak one
+                    where_ = x.eye != y.eye
+                        ? String(format: "eye %.2f→%.2f", x.eye, y.eye)
+                        : String(format: "move %@→%@",
+                                 x.move.map { String(format: "%.2f", $0) } ?? "off",
+                                 y.move.map { String(format: "%.2f", $0) } ?? "off")
+                }
+            }
+            return (worst, where_)
+        }
 
-        let dips = zip(ms, ms.dropFirst())
-            .filter { $1.solidity < $0.solidity - 0.005 }
-            .map { String(format: "%.1f→%.1f (%.2f→%.2f)", $0.strain, $1.strain, $0.solidity, $1.solidity) }
-        check("solidity never falls", dips.joined(separator: ", "), dips.isEmpty)
+        // Movement. This is the axis the previous design lost, so it is checked at
+        // every eye level rather than just the convenient one.
+        var worstMove = Int.max, worstMoveAt = ""
+        for e in [0.0, 0.5, 1.0, 1.5, 2.0] as [CGFloat] {
+            let col = moveSteps.map { IconMaker.GlyphState(eye: e, move: $0) }
+            let (d, w) = worstStep(col, plain)
+            if d < worstMove { worstMove = d; worstMoveAt = w }
+        }
+        check("every posture step is visible at 36px",
+              "worst \(worstMove) px at \(worstMoveAt)", worstMove >= floor)
 
-        // The design's language: hollow when rested, white still showing when the
-        // break is merely due, solid only once you've let it go overdue.
-        let atDue = ms.first { $0.strain >= 1.0 }?.solidity ?? 1
-        let flooded = ms.first { $0.strain >= 1.5 }?.solidity ?? 0
-        check("hollow when rested", String(format: "%.2f", rested.solidity), rested.solidity < 0.65)
-        check("white still showing when due", String(format: "%.2f", atDue), atDue < 0.90)
-        check("solid once overdue (by 1.5)", String(format: "%.2f", flooded), flooded > 0.98)
+        // The eye axis in colour. Its whole range is a hue ramp on one disc, so this
+        // is the assertion that the ramp's stops are far enough apart to read.
+        let (worstEye, worstEyeAt) = worstStep(eyeSteps.map { .init(eye: $0, move: 0.5) }, plain)
+        check("every eye step is visible at 36px", "worst \(worstEye) px at \(worstEyeAt)", worstEye >= floor)
 
-        // Damage: cracks for eye rests missed, a foot for a movement break missed.
-        // Both are knockouts, so unlike strain they take ink *away* — the monotonic
-        // checks above deliberately sweep the clean glyph only. What has to hold
-        // here is weaker but is the thing that actually breaks: a mark that renders
-        // as nothing. It happened once already — added splinters at the lens corners
-        // fell off the 18pt canvas the moment the overdue eye swelled, so the most
-        // damaged glyph drew identically to the clean one. Nothing caught it but a
-        // rendered strip and a pair of eyes; this is what catches it next time.
-        let marks: [(String, Int, Bool, Bool)] = [
-            ("1 crack", 1, false, false), ("2 cracks", 2, false, false), ("3 cracks", 3, false, false),
-            ("foot", 0, true, false), ("both", 3, true, false),
-            ("on a call", 0, false, true), ("on a call, both", 3, true, true),
-        ]
-        // In glyph-space units of area, and an absolute floor rather than a share
-        // of a glyph whose total ink trebles between rested and flooded.
-        //
-        // Be clear about what this does and doesn't prove. The faintest mark drawn
-        // measures 1.8 units — one crack on a rested eye, where it only has the
-        // 1.5pt rim to cut through — and that one is plainly visible, because a gap
-        // in a thin ring reads far louder than its area. So area under-measures the
-        // marks and the floor has to sit below the faintest real one. This catches a
-        // mark that renders as *nothing*, which is the failure that actually
-        // happened. It does not measure legibility: only the rendered strip at true
-        // bar size does that, and only a person can read it.
-        let minMark = 1.5
-        var faint: [String] = []
-        for st in [CGFloat(0), 0.5, 1.0, 1.5, 2.0] {
-            let clean = IconMaker.measure(strain: st).ink
-            for (name, cracks, foot, onCall) in marks {
-                let marked = IconMaker.measure(strain: st, cracks: cracks, foot: foot, onCall: onCall).ink
-                let delta = abs(marked - clean)
-                if delta < minMark { faint.append(String(format: "%@ @%.1f (%.1f)", name, st, delta)) }
+        // The one that makes the fallback real. Making the head solid moved the eye
+        // axis entirely onto colour: in monochrome the first three steps are 0 px.
+        // `differentiateWithoutColor` hands the axis back to head size, and if that
+        // ever stops working the fallback is decoration.
+        let (worstMonoEye, worstMonoAt) = worstStep(eyeSteps.map { .init(eye: $0, move: 0.5) }, mono)
+        check("…and still visible with colour switched off",
+              "worst \(worstMonoEye) px at \(worstMonoAt)", worstMonoEye >= floor)
+
+        // Orthogonality, phrased on the marks rather than on pixels: the gauges may
+        // not borrow each other's channel. Movement moving the head would make the
+        // eye unreadable while movement changed; the eye moving the body would break
+        // the silhouette pace is findable by on a crowded bar.
+        let headMoved = moveSteps.contains { m in
+            IconMaker.marks(.init(eye: 1.0, move: m)).first { $0.id == .head }?.tone
+                != IconMaker.marks(.init(eye: 1.0, move: 0)).first { $0.id == .head }?.tone
+        }
+        check("movement never touches the eye's tone", "", !headMoved)
+        let bodyMoved = eyeSteps.contains { e in
+            IconMaker.marks(.init(eye: e, move: 1.0)).first { $0.id == .body }
+                != IconMaker.marks(.init(eye: 0, move: 1.0)).first { $0.id == .body }
+        }
+        check("the eye never moves the body", "", !bodyMoved)
+
+        // Posture only ever closes, and only movement closes it.
+        let leans = moveSteps.map { IconMaker.posture(move: IconMaker.strain($0, paused: false),
+                                                      onCall: false, nudge: false).leanDeg }
+        check("the lean only ever increases",
+              String(format: "%.0f° → %.0f°", leans.first ?? 0, leans.last ?? 0),
+              zip(leans, leans.dropFirst()).allSatisfy { $1 > $0 })
+        check("rested still reads as a body, not a flagpole",
+              String(format: "%.0f°", leans.first ?? 0), (leans.first ?? 0) > 5)
+
+        // Breaks missed ride the eye ramp rather than getting a mark of their own,
+        // so a refusal has to actually move the tone.
+        let byMissed = (0...IconMaker.maxMissed).map { n in
+            IconMaker.marks(.init(eye: 0.5, missed: n)).first { $0.id == .head }?.tone
+        }
+        check("each further break missed shows on the head", "0…\(IconMaker.maxMissed)",
+              Set(byMissed.map { String(describing: $0) }).count == IconMaker.maxMissed + 1)
+
+        // Everything must fit the 18pt box. The eye axis is forbidden from moving
+        // the body, so the figure has to be laid out for its LARGEST head — which
+        // the monochrome one is, and it grew straight out of the top before this
+        // check existed.
+        var spill: [String] = []
+        for ap in [plain, mono] {
+            for e in eyeSteps {
+                for m in moveSteps {
+                    for (call, paused) in [(false, false), (true, false), (false, true)] {
+                        let st = IconMaker.GlyphState(eye: e, move: m, missed: 3,
+                                                      onCall: call, paused: paused)
+                        for mk in IconMaker.marks(st, ap) {
+                            let b = IconMaker.bounds(mk)
+                            if b.minX < -0.01 || b.minY < -0.01 || b.maxX > 18.01 || b.maxY > 18.01 {
+                                spill.append(String(format: "%@ eye %.1f move %.1f → %.1f…%.1f",
+                                                    String(describing: mk.id), e, m, b.minY, b.maxY))
+                            }
+                        }
+                    }
+                }
             }
         }
-        check("every mark shows on the glyph it marks", faint.joined(separator: ", "), faint.isEmpty)
+        check("the glyph never leaves its 18pt box", spill.prefix(2).joined(separator: ", "), spill.isEmpty)
 
-        // And each extra crack has to be its own step, or the count is decoration.
-        let counted = [CGFloat(0), 1.0, 1.5].allSatisfy { st in
-            let inks = (0...IconMaker.maxCracks).map { IconMaker.measure(strain: st, cracks: $0).ink }
-            return zip(inks, inks.dropFirst()).allSatisfy { $0 - $1 > 0.5 }
+        // The appearance matrix, enumerated. This is the payoff for Appearance being
+        // a value: the combination that only shows up on someone else's Mac with an
+        // accessibility setting on is checked here rather than discovered there.
+        var blank: [String] = []
+        for dark in [false, true] {
+            for hi in [false, true] {
+                for diff in [false, true] {
+                    for contrast in [false, true] {
+                        let ap = IconMaker.Appearance(barIsDark: dark, highlighted: hi,
+                                                      differentiateWithoutColor: diff,
+                                                      increaseContrast: contrast)
+                        let ink = IconMaker.measure(.init(eye: 1.0, move: 1.0), ap).ink
+                        if ink < 20 { blank.append("dark:\(dark) hi:\(hi) diff:\(diff) contrast:\(contrast)") }
+                    }
+                }
+            }
         }
-        check("each further crack cuts more away", "1…\(IconMaker.maxCracks)", counted)
+        check("all 16 appearance combinations draw a glyph", blank.joined(separator: ", "), blank.isEmpty)
+
+        // A template image is the only kind macOS tints for free, so the mono path
+        // must actually produce one — and the colour path must not claim to be one.
+        check("colour off gives a template image", "",
+              IconMaker.statusImage(.init(eye: 1.0), mono).isTemplate)
+        check("colour on gives a plain image", "",
+              !IconMaker.statusImage(.init(eye: 1.0), plain).isTemplate)
+
+        // Mode composition, on the marks: what is on the glyph in each mode, by name.
+        func ids(_ st: IconMaker.GlyphState) -> String {
+            IconMaker.marks(st).map { String(describing: $0.id) }.joined(separator: " + ")
+        }
+        check("paused lays the pause sign over the figure", ids(.init(eye: 1.5, paused: true)),
+              ids(.init(eye: 1.5, paused: true)) == "body + head + pauseHalo + pauseHalo + pause + pause")
+        check("a paused glyph reads as rested", "",
+              IconMaker.marks(.init(eye: 2.0, missed: 3, paused: true)) == IconMaker.marks(.init(eye: 0, paused: true)))
+        check("on a call keeps the held bar", ids(.init(eye: 1.0, onCall: true)),
+              ids(.init(eye: 1.0, onCall: true)) == "body + callBar + head")
+        check("the glance-away cue sits the figure up", "",
+              IconMaker.posture(move: IconMaker.strain(2, paused: false), onCall: true, nudge: true).leanDeg
+                  < IconMaker.posture(move: IconMaker.strain(2, paused: false), onCall: true, nudge: false).leanDeg)
 
         print("\nloop — extending a break must never credit a rest")
         let loop = extendFourTimes()
