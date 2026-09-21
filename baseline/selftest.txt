@@ -1,12 +1,21 @@
 
-glyph — the icon must never look calmer the more rest you owe
-  ok   ink only ever increases
-  ok   solidity never falls
-  ok   hollow when rested   0.57
-  ok   white still showing when due   0.82
-  ok   solid once overdue (by 1.5)   1.00
-  ok   every mark shows on the glyph it marks
-  ok   each further crack cuts more away   1…3
+glyph — a gauge you cannot see is not a gauge
+  ok   every posture step is visible at 36px   worst 13 px at move 0.00→0.25
+  ok   every eye step is visible at 36px   worst 46 px at eye 1.00→1.50
+  ok   …and still visible with colour switched off   worst 29 px at eye 1.00→1.50
+  ok   movement never touches the eye's tone
+  ok   the eye never moves the body
+  ok   the lean only ever increases   9° → 46°
+  ok   rested still reads as a body, not a flagpole   9°
+  ok   each further break missed shows on the head   0…3
+  ok   the glyph never leaves its 18pt box
+  ok   all 16 appearance combinations draw a glyph
+  ok   colour off gives a template image
+  ok   colour on gives a plain image
+  ok   paused lays the pause sign over the figure   body + head + pauseHalo + pauseHalo + pause + pause
+  ok   a paused glyph reads as rested
+  ok   on a call keeps the held bar   body + callBar + head
+  ok   the glance-away cue sits the figure up
 
 loop — extending a break must never credit a rest
   ok   counter keeps climbing through 4 extensions   1.00 → 2.00 → 3.00 → 4.00
@@ -87,6 +96,17 @@ keyboard — every button on the card must have a key, and no key may act alone
   ok   ⌘ plus another modifier is left alone
   ok   caps lock doesn't break it
   ok   ⌘Q and friends pass through
+
+nudges — a record of what was sent must not be a record of what was intended
+  ok   a denied permission can never record as sent
+  ok   banners on, accepted, reads as sent
+  ok   banners off still leaves Notification Centre
+  ok   a refused request is not a delivery
+  ok   a nudge with no delivery recorded claims neither way
+  ok   the row says in words what became of it
+  ok   a blocked nudge is not drawn as a delivered one
+  ok   a delivery survives the log and back   banner
+  ok   newest first, grouped by day   ["Today", "Yesterday"]
 
 vault health — a broken vault must read as broken, then heal
   ok   three failures count as three   3

@@ -424,6 +424,35 @@ enum SelfTest {
         check("caps lock doesn't break it", "", key("S", [.command, .capsLock]) == .skip)
         check("⌘Q and friends pass through", "", key("q") == nil && key("w") == nil)
 
+        print("\nnudges — a record of what was sent must not be a record of what was intended")
+        // The failure this section gates: a nudge logged whatever macOS did, so
+        // "I never saw it" and "it was never sent" left identical rows. Every
+        // claim here is about that distinction surviving.
+        check("a denied permission can never record as sent", "",
+              ![Permission.denied, .neverAsked, .noBundle]
+                  .map { Delivery.of($0, failed: false) }
+                  .contains { $0.sent })
+        check("banners on, accepted, reads as sent", "",
+              Delivery.of(.allowed(alerts: true), failed: false) == .banner)
+        check("banners off still leaves Notification Centre", "",
+              Delivery.of(.allowed(alerts: false), failed: false) == .centreOnly)
+        check("a refused request is not a delivery", "",
+              !Delivery.of(.allowed(alerts: true), failed: true).sent)
+        // The one that keeps the back history honest: rows written before delivery
+        // was tracked must not be read as either outcome.
+        let nudges = nudgeLog()
+        check("a nudge with no delivery recorded claims neither way", "",
+              Delivery.describe(nil) == Delivery.unrecorded
+              && nudges.tally == Activity.Tally(sent: 1, notSent: 1, unrecorded: 1))
+        check("the row says in words what became of it", "",
+              nudges.sentRow.contains("banner sent") && nudges.blockedRow.contains("not sent"))
+        check("a blocked nudge is not drawn as a delivered one", "",
+              nudges.sentTone == .sent && nudges.blockedTone == .missed && nudges.legacyTone == .missed)
+        check("a delivery survives the log and back", "\(nudges.roundTripped ?? "nil")",
+              nudges.roundTripped == Delivery.banner.rawValue)
+        check("newest first, grouped by day", "\(nudges.dayTitles)",
+              nudges.dayTitles == ["Today", "Yesterday"] && nudges.firstRowIsNewest)
+
         print("\nvault health — a broken vault must read as broken, then heal")
         var h = Report.VaultHealth()
         let t = Date(timeIntervalSince1970: 1_755_000_000)
@@ -434,6 +463,42 @@ enum SelfTest {
 
         print(failures == 0 ? "\nall checks passed\n" : "\n\(failures) check(s) failed\n")
         return failures == 0 ? 0 : 1
+    }
+
+    /// Three nudges — one delivered, one blocked, one from before delivery was
+    /// recorded — plus a day boundary, through the real builder. Everything the
+    /// activity log claims is read off this one fixture.
+    private static func nudgeLog() -> (tally: Activity.Tally, sentRow: String, blockedRow: String,
+                                       sentTone: Activity.Tone, blockedTone: Activity.Tone,
+                                       legacyTone: Activity.Tone, roundTripped: String?,
+                                       dayTitles: [String], firstRowIsNewest: Bool) {
+        let cal = Calendar.current
+        let now = Date(timeIntervalSince1970: 1_755_000_000)
+        let today = cal.startOfDay(for: now).addingTimeInterval(9 * 3600)
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        let events = [
+            BreakEvent(at: today, kind: "eye", outcome: "nudged", seconds: 0,
+                       overdueSec: 0, refusals: 0, callSec: 600, delivery: Delivery.banner.rawValue),
+            BreakEvent(at: today + 600, kind: "eye", outcome: "nudged", seconds: 0,
+                       overdueSec: 300, refusals: 0, callSec: 1200, delivery: Delivery.blocked.rawValue),
+            BreakEvent(at: today + 1200, kind: "move", outcome: "nudged", seconds: 0),   // before delivery existed
+            BreakEvent(at: yesterday, kind: "eye", outcome: "completed", seconds: 30),
+        ]
+        let log = Activity.log(events, now: now, permission: .allowed(alerts: true), calendar: cal)
+        let rows = log.days.first?.rows ?? []
+        // Round-trip through the encoder the log actually writes with.
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let back = (try? enc.encode(events[0])).flatMap { try? dec.decode(BreakEvent.self, from: $0) }
+        return (tally: log.tally,
+                sentRow: Activity.row(events[0]).detail,
+                blockedRow: Activity.row(events[1]).detail,
+                sentTone: Activity.row(events[0]).tone,
+                blockedTone: Activity.row(events[1]).tone,
+                legacyTone: Activity.row(events[2]).tone,
+                roundTripped: back?.delivery,
+                dayTitles: log.days.map(\.title),
+                firstRowIsNewest: rows.first?.at == today + 1200)
     }
 
     /// A row from before `overdueSec`/`refusals` existed. `Report.events()` drops

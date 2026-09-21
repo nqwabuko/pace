@@ -101,6 +101,47 @@ if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     exit(ok ? 0 : 1)
 }
 
+// `--nudge-test`: post one real on-call nudge and print what became of it.
+// `--check` says what macOS *allows*; this proves the whole path, which is the
+// only way to tell a banner you missed from one that was never drawn. It writes
+// nothing to the log, because nothing about it is a break you owed.
+if args.contains("--nudge-test") {
+    Settings.registerDefaults()
+    var result: Delivery?
+    Notify.post(title: "Rest your eyes", body: Tips.callCue(for: .eye), id: "pace-nudge-test") { result = $0 }
+    let deadline = Date().addingTimeInterval(5)
+    while result == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    print(result?.human ?? "no answer in 5s — the notification centre never called back")
+    exit(result?.sent == true ? 0 : 1)
+}
+
+// `--activity [days]`: print the action log — what pace did, in order, and what
+// became of each on-call nudge. The same rows the window shows, from the same
+// pure builder, so the terminal and the window can't tell you different stories.
+if let i = args.firstIndex(of: "--activity") {
+    Settings.registerDefaults()
+    let days = i + 1 < args.count ? (Int(args[i + 1]) ?? 7) : 7
+    // Asking macOS needs a bundle and a run loop; from a bare binary the honest
+    // answer is `.noBundle`, which is what `Notify.permission` gives back at once.
+    var permission: Permission?
+    Notify.permission { permission = $0 }
+    let deadline = Date().addingTimeInterval(2)
+    while permission == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    let log = Activity.log(Report.events(), now: Date(), daysBack: days, permission: permission ?? .noBundle)
+    print(Activity.plainText(log))
+    exit(0)
+}
+
+// `--activity-preview <path> [height]`: render the activity window offscreen.
+if let i = args.firstIndex(of: "--activity-preview"), i + 1 < args.count {
+    Settings.registerDefaults()
+    let h = i + 2 < args.count ? (Int(args[i + 2]) ?? 900) : 900
+    let log = Activity.log(Report.events(), now: Date(), permission: .allowed(alerts: true))
+    let ok = ActivityPreview.write(to: args[i + 1], view: ActivityView(log: log), height: h)
+    print(ok ? "wrote \(args[i + 1])" : "failed to render")
+    exit(ok ? 0 : 1)
+}
+
 // `--break-preview <path> [move] [dark] [overdue <min>] [snoozed|skipped|held|interrupted …]`:
 // render the break card offscreen with a given trail, to judge how the chain
 // reads in each state it moulds to.
@@ -138,6 +179,14 @@ if let ci = args.firstIndex(of: "--check") {
     print("in a call  : \(Signals.inCall())   (mic: \(Signals.micInUse()))")
     print("idle (s)   : \(String(format: "%.1f", Signals.idleSeconds()))")
     print("login item : \(LoginItem.enabled.map(String.init) ?? "n/a — ask the installed app, not this binary")")
+    // Whether an on-call nudge can reach the desktop at all. Asked of macOS, not
+    // assumed: this is the difference between a nudge you missed and one that was
+    // never shown, and from a bare binary there is no bundle to ask about.
+    var permission: Permission?
+    Notify.permission { permission = $0 }
+    let deadline = Date().addingTimeInterval(2)
+    while permission == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    print("notifs     : \(permission?.human ?? "no answer in 2s")")
     let vault = ci + 1 < args.count ? args[ci + 1] : Settings.vaultPath
     print("vault      : \(vault.isEmpty ? "not logging" : vault)")
     if !vault.isEmpty { print("vault write: \(Report.probeVault(vault, now: Date()) ?? "OK")") }

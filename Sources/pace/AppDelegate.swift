@@ -11,11 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var menu: NSMenu!
     private var statsWindow: NSWindow?
     private var feedbackWindow: NSWindow?
+    private var activityWindow: NSWindow?
     private var nudgeUntil: Date?
     private var lastAppearance: IconMaker.Appearance?
     private var lastGlyph: IconMaker.GlyphState?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
     private var lastStatus: Scheduler.Status?   // latest tick, so a closing break can log what it owed
-    private let notificationsAvailable = Bundle.main.bundleURL.pathExtension == "app"
+    private let notificationsAvailable = Notify.available
 
     // Menu items we update live / on open.
     private let headerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -147,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let reporting = NSMenuItem(title: "Reporting", action: nil, keyEquivalent: "")
         let rs = NSMenu()
         add(rs, "Show stats…", #selector(showStats))
+        add(rs, "What pace has done…", #selector(showActivity))
         rs.addItem(.separator())
         vaultItem.target = self   // clicking it retries the write, which is what you'd want anyway
         rs.addItem(vaultItem)
@@ -383,23 +385,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         nudgeUntil = Date().addingTimeInterval(30)
         let owed = lastStatus?.gauge(kind)
         let now = Date()
-        Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
-                   overdueSec: owed?.overdue, refusals: owed?.refusals,
-                   callSec: owed?.callHeldSec, now: now)
-        if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
-
-        guard notificationsAvailable else { return }
-        let content = UNMutableNotificationContent()
-        content.title = kind == .eye ? "Rest your eyes" : "Shift your body"
-        content.body = Tips.callCue(for: kind)
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "pace-nudge-\(kind.label)", content: content, trigger: nil))
+        // The row is written from the delivery callback, not before it. A nudge
+        // during a call is the one break pace can't show you, so the only fact
+        // worth recording about it is whether it left the app — and a row saying
+        // "nudged" that was written whatever macOS did made "I never saw it" and
+        // "it was never sent" the same record. `Notify.post` calls back exactly
+        // once on every path, including the refusals, so there is still one row
+        // per nudge.
+        Notify.post(title: kind == .eye ? "Rest your eyes" : "Shift your body",
+                    body: Tips.callCue(for: kind),
+                    id: "pace-nudge-\(kind.label)") { delivery in
+            Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
+                       overdueSec: owed?.overdue, refusals: owed?.refusals,
+                       callSec: owed?.callHeldSec, delivery: delivery, now: now)
+            if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
+        }
     }
 
-    private func ensureNotifPermission() {
-        guard notificationsAvailable else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
-    }
+    private func ensureNotifPermission() { Notify.requestPermission() }
 
     // Show the nudge banner even though pace is a background (menu-bar) app.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -500,6 +503,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// Only this window scrolls, so only this one collapsed; the feedback window's
     /// view has a real intrinsic height and sizes itself correctly.
     private var statsSize: NSSize { NSSize(width: 460, height: 720) }
+
+    /// The action log. The notification status is asked for first and the window
+    /// opens on the answer: "can a nudge reach this desktop" is the headline fact
+    /// on it, and a window that opens saying "checking…" is a window you read
+    /// before it knows anything.
+    @objc private func showActivity() {
+        Notify.permission { [weak self] permission in
+            guard let self else { return }
+            let view = ActivityView(log: Activity.log(Report.events(), now: Date(), permission: permission))
+            let host = NSHostingController(rootView: view)
+            if let w = self.activityWindow {
+                w.contentViewController = host
+                w.setContentSize(self.activitySize)
+            } else {
+                let w = NSWindow(contentRect: NSRect(origin: .zero, size: self.activitySize),
+                                 styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                w.title = "pace activity"
+                w.isReleasedWhenClosed = false
+                w.contentViewController = host
+                // Same trap as the stats window: a scrolling root view reports a
+                // preferred size of zero, and the window adopts it as a bare title bar.
+                w.setContentSize(self.activitySize)
+                w.center()
+                self.activityWindow = w
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            self.activityWindow?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private var activitySize: NSSize { NSSize(width: 520, height: 640) }
 
     @objc private func showFeedback() {
         let view = FeedbackView(

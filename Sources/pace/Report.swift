@@ -32,8 +32,22 @@ struct BreakEvent: Codable {
     /// Optional for the same non-negotiable reason as the two above.
     let callSec: Int?
 
+    /// For a `nudged` row: what became of the notification, as a `Delivery` raw
+    /// value. The row used to say only that the loop decided to nudge, which left
+    /// "I never saw it" and "it was never sent" looking identical on the record —
+    /// the one thing an on-call nudge has to be able to tell you, because you
+    /// cannot watch the menu bar while you are looking at someone's face.
+    ///
+    /// Stored as a string, not a `Delivery`, for the same reason the three above
+    /// are optional: a row carrying a value this build doesn't know would fail to
+    /// decode, and `events()` drops what it can't decode. Rows written before this
+    /// existed have no delivery, and that reads as *unrecorded* rather than as
+    /// delivered — an absent record is not an outcome.
+    let delivery: String?
+
     init(at: Date, kind: String, outcome: String, seconds: Int,
-         overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil) {
+         overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil,
+         delivery: String? = nil) {
         self.at = at
         self.kind = kind
         self.outcome = outcome
@@ -41,6 +55,7 @@ struct BreakEvent: Codable {
         self.overdueSec = overdueSec
         self.refusals = refusals
         self.callSec = callSec
+        self.delivery = delivery
     }
 }
 
@@ -92,9 +107,10 @@ enum Report {
 
     static func log(kind: String, outcome: String, seconds: Int,
                     overdueSec: Int? = nil, refusals: Int? = nil, callSec: Int? = nil,
-                    now: Date) {
+                    delivery: Delivery? = nil, now: Date) {
         let ev = BreakEvent(at: now, kind: kind, outcome: outcome, seconds: seconds,
-                            overdueSec: overdueSec, refusals: refusals, callSec: callSec)
+                            overdueSec: overdueSec, refusals: refusals, callSec: callSec,
+                            delivery: delivery?.rawValue)
         guard let data = try? enc.encode(ev), let line = String(data: data, encoding: .utf8) else { return }
         io.async {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

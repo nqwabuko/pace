@@ -158,6 +158,63 @@ glance; the Obsidian export below is for long-range tracking.
 Render it to a PNG without opening a window over your work:
 `swift run pace --stats-preview /tmp/stats.png`.
 
+## What pace has done
+
+Right-click → **Reporting** → **What pace has done…**, or
+`pace --activity` in a terminal. The log, in order, in words:
+
+```
+Notifications: on — nudges appear as banners
+3 nudges during calls today · 3 sent to your desktop.
+
+Today
+  11:23  Eye nudge during a call
+          banner sent · 19 min on calls since the last rest
+  11:01  Eye break taken
+          rested 30s · 9 min past due · 27 min on calls since the last rest
+  09:59  Move break put off (+5 min)
+          the counter keeps climbing
+```
+
+It exists because the menu-bar gauge cannot answer the question it provokes. A
+red head says a debt exists; it cannot say whether you were **asked** to clear it
+and missed the ask, or were never asked at all. That gap is widest exactly where
+it matters — during a call, when a notification is the only channel pace has and
+the menu bar is the one thing you are not looking at.
+
+So the row records the **delivery, not the intention**. It used to log that the
+loop decided to nudge, whatever macOS then did with it, which made *"I never saw
+it"* and *"it was never sent"* the same record. Now a nudge is written from the
+notification centre's own callback and says which it was: `banner sent`,
+`sent, but banners are off — Notification Centre only`, `not sent —
+notifications are off for pace`, or `not sent — macOS refused it`. One honest
+limit, and the window says so too: a Focus mode can still swallow a banner after
+macOS accepts it, and it tells apps nothing about that. **Sent is not seen.**
+
+Rows written before this existed read as *not recorded* rather than as
+delivered. An absent record is not an outcome, and reading it as one would
+backdate a claim onto every nudge in the history.
+
+`Activity` is pure — events plus a `Permission` plus `now` in, one `Log` value
+out — and the window and the terminal are two renderings of that one value, so
+they cannot disagree with each other. The whole delivery rule is
+`Delivery.of(Permission, failed:)`, one total function, which is why `--selftest`
+can assert that a denied permission never records as sent without a notification
+centre to deny anything.
+
+Whether a nudge can reach you at all is also a `--check` line now:
+
+```
+notifs     : on — nudges appear as banners
+```
+
+`--check` says what macOS *allows*. To prove the whole path — including the part
+no API will tell you about — post one for real and watch your own screen:
+
+```sh
+/Applications/pace.app/Contents/MacOS/pace --nudge-test    # exits non-zero if nothing was sent
+```
+
 ## The chain on the card
 
 A break that turns up late looks exactly like a break that turns up on time, and
@@ -319,6 +376,8 @@ swift run pace --check            # print mic-in-use / idle / login-item and exi
 swift run pace --check ~/vault    # ...and try a real write into that folder
 swift run pace --sim              # run the whole loop against a fake clock
 swift run pace --stats-preview /tmp/s.png   # render the stats window off sample data
+swift run pace --activity                   # the action log: what pace did, and what was delivered
+swift run pace --activity-preview /tmp/a.png   # ...as the window draws it, offscreen
 swift run pace --break-preview /tmp/c.png snoozed skipped overdue 22   # the card, with a trail
 ```
 
@@ -362,6 +421,12 @@ debt — extensions and the time they cost must both survive the log
   ok   first-time split ignores rows with no refusals recorded
   ok   a legacy day still shows its breaks, with no debt claimed
   ok   a long spell away records the debt you walked away with, not the time away
+
+nudges — a record of what was sent must not be a record of what was intended
+  ok   a denied permission can never record as sent
+  ok   banners off still leaves Notification Centre
+  ok   a nudge with no delivery recorded claims neither way
+  ok   a blocked nudge is not drawn as a delivered one
 
 vault health — a broken vault must read as broken, then heal
   ok   three failures count as three   3
@@ -416,6 +481,11 @@ configuration.
 - `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon. Two halves with a
   hard seam: pure derivations (state → numbers → a list of marks) above, and one
   twenty-line interpreter that is the only thing in it that draws.
+- `Sources/pace/Notify.swift` — `Permission` and `Delivery`: what macOS allows, what
+  became of a notification, and one total function from the first to the second.
+  The two API calls at the bottom are the only impure lines in it.
+- `Sources/pace/Activity.swift` — the action log as a pure value: events → `Log`.
+- `Sources/pace/ActivityView.swift` — one `Log` in, the window out. No clock, no disk.
 - `Sources/pace/Report.swift` — the JSONL log, the debt arithmetic, the Obsidian render.
 - `Sources/pace/StatsView.swift` — the stats window, including the put-off panel.
 - `Sources/pace/Sim.swift` — the fake-clock harness behind `--sim`.
