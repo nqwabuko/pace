@@ -424,6 +424,24 @@ enum SelfTest {
         check("caps lock doesn't break it", "", key("S", [.command, .capsLock]) == .skip)
         check("⌘Q and friends pass through", "", key("q") == nil && key("w") == nil)
 
+        print("\nfocus — a card that took the keyboard has to give it back")
+        // The bug: a borderless full-screen window must steal activation or Esc
+        // and ⌘S go to whatever is behind it, and nothing gave it back. pace has
+        // no windows of its own, so a dismissed break left the keys typing into
+        // nothing. Every way out of the card runs one `close`, so this is asserted
+        // once rather than per button.
+        let editor: pid_t = 501, pace: pid_t = 99
+        check("the app the card interrupted gets the keyboard back", "",
+              Handback.decide(paceActive: true, pace: pace, previous: editor, alive: true) == .give(editor))
+        check("clicking into something else during the break wins", "",
+              Handback.decide(paceActive: false, pace: pace, previous: editor, alive: true) == .keep)
+        check("an app that quit mid-break leaves pace standing down", "",
+              Handback.decide(paceActive: true, pace: pace, previous: editor, alive: false) == .standDown)
+        check("pace never hands the keyboard to itself", "",
+              Handback.decide(paceActive: true, pace: pace, previous: pace, alive: true) == .standDown)
+        check("no record of who was there is not a reason to keep it", "",
+              Handback.decide(paceActive: true, pace: pace, previous: nil, alive: true) == .standDown)
+
         print("\nnudges — a record of what was sent must not be a record of what was intended")
         // The failure this section gates: a nudge logged whatever macOS did, so
         // "I never saw it" and "it was never sent" left identical rows. Every

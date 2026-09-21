@@ -97,6 +97,13 @@ keyboard — every button on the card must have a key, and no key may act alone
   ok   caps lock doesn't break it
   ok   ⌘Q and friends pass through
 
+focus — a card that took the keyboard has to give it back
+  ok   the app the card interrupted gets the keyboard back
+  ok   clicking into something else during the break wins
+  ok   an app that quit mid-break leaves pace standing down
+  ok   pace never hands the keyboard to itself
+  ok   no record of who was there is not a reason to keep it
+
 nudges — a record of what was sent must not be a record of what was intended
   ok   a denied permission can never record as sent
   ok   banners on, accepted, reads as sent

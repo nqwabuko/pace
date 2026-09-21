@@ -49,7 +49,14 @@ A one-second feedback loop, like netty's sampler:
    watchdog timer that closes it even if its own countdown dies. A
    window that covers your whole screen should not be able to outlive its clock.
    If a call starts mid-break, it bows out at once and is logged as
-   *interrupted*, not *skipped* — you didn't refuse anything.
+   *interrupted*, not *skipped* — you didn't refuse anything. However it ends,
+   **the keyboard goes back where it came from**: a borderless full-screen window
+   has to steal activation or Esc and ⌘S land in whatever is behind it, and pace
+   has no windows of its own to hold it in, so a dismissed card used to leave you
+   typing into nothing until you clicked something. Unless you clicked into
+   something else *during* the break — that choice is newer than the card's, and
+   `Handback.decide` is where that rule lives, apart from the AppKit that performs
+   it.
 
 The loop reads a **monotonic clock**, not its own tick count. If the run loop is
 starved (App Nap, a slow disk) the next tick still counts every second that
@@ -422,6 +429,11 @@ debt — extensions and the time they cost must both survive the log
   ok   a legacy day still shows its breaks, with no debt claimed
   ok   a long spell away records the debt you walked away with, not the time away
 
+focus — a card that took the keyboard has to give it back
+  ok   the app the card interrupted gets the keyboard back
+  ok   clicking into something else during the break wins
+  ok   pace never hands the keyboard to itself
+
 nudges — a record of what was sent must not be a record of what was intended
   ok   a denied permission can never record as sent
   ok   banners off still leaves Notification Centre
@@ -476,7 +488,8 @@ configuration.
 - `Sources/pace/Settings.swift` — one typed store over UserDefaults.
 - `Sources/pace/Signals.swift` — mic-in-use (CoreAudio) + idle (IOKit).
 - `Sources/pace/Scheduler.swift` — the 1-second loop, guards, counters.
-- `Sources/pace/BreakOverlay.swift` — the dismissible overlay window, and the chain on it.
+- `Sources/pace/BreakOverlay.swift` — the dismissible overlay window, the chain on
+  it, and `Handback`: where the keyboard goes when the card closes.
 - `Sources/pace/AppDelegate.swift` — status item + menu.
 - `Sources/pace/IconMaker.swift` — menu-bar glyph + app icon. Two halves with a
   hard seam: pure derivations (state → numbers → a list of marks) above, and one

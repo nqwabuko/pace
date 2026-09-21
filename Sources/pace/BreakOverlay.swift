@@ -100,6 +100,30 @@ private final class BreakWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+/// Where the keyboard goes when a card closes.
+///
+/// The rule, apart from the AppKit that performs it, so `--selftest` can assert
+/// that a break never grabs focus back off an app you chose yourself — a claim
+/// about activation that is otherwise only checkable by sitting in front of the
+/// machine and trying it.
+enum Handback: Equatable {
+    case keep              // pace isn't holding activation: nothing to give back
+    case give(pid_t)       // hand it to the app the card interrupted
+    case standDown         // nobody to hand it to; stop holding it either way
+
+    /// `previous` is who was frontmost when the card opened, `alive` whether that
+    /// app is still running. One total function of the four things that matter.
+    static func decide(paceActive: Bool, pace: pid_t, previous: pid_t?, alive: Bool) -> Handback {
+        // You clicked into something while the card was up. That choice is newer
+        // than the card's, and taking focus off it would be the app overruling
+        // you — the same rule that leaves a break you asked for on screen when a
+        // call starts.
+        guard paceActive else { return .keep }
+        guard let previous, alive, previous != pace else { return .standDown }
+        return .give(previous)
+    }
+}
+
 /// The shell around `Card`: it owns the window, the two clocks, the key monitor
 /// and the sounds, and it owns no rules at all. Everything that happens arrives
 /// as a `Card.Event`, the machine says what the new state is and what to do, and
@@ -116,6 +140,19 @@ final class OverlayController {
     private var countdown: Timer?
     private var watchdog: Timer?
     private var keyMonitor: Any?
+
+    /// Who was in front when the card took the screen.
+    ///
+    /// A full-screen borderless window has to steal activation, or Esc and ⌘S go
+    /// to whatever is behind it. Nothing ever gave it back: pace is an accessory
+    /// app with no windows of its own, so after the card closed it sat there
+    /// holding activation and your keys typed into nothing until you clicked
+    /// something. The break was over and the interruption wasn't.
+    ///
+    /// Shell state, deliberately not in `Card`: which app was frontmost is a
+    /// reading of the world, and the card's rules don't get a clock or a
+    /// workspace for the same reason.
+    private var interrupted: NSRunningApplication?
 
     /// Called with the reason when a break ends (completed / skipped / snoozed /
     /// interrupted).
@@ -166,9 +203,37 @@ final class OverlayController {
             window?.orderOut(nil)
             window = nil
             vm = nil
+            restoreFocus()
 
         case .ended(let kind, let reason):
             onEnd?(kind, reason)
+        }
+    }
+
+    /// Give activation back to whoever the card took it from, on every way out:
+    /// skipped, extended, sat through, or dropped for a call. Handing it back is
+    /// part of closing the card, not a courtesy attached to one button.
+    ///
+    /// Only while pace still holds it. If you clicked into something else while
+    /// the card was up, that choice is newer than ours and pulling focus off it
+    /// would be the app overruling you — the same rule that leaves a break you
+    /// asked for on screen when a call starts.
+    private func restoreFocus() {
+        let target = interrupted
+        interrupted = nil
+        switch Handback.decide(paceActive: NSApp.isActive,
+                               pace: ProcessInfo.processInfo.processIdentifier,
+                               previous: target?.processIdentifier,
+                               alive: !(target?.isTerminated ?? true)) {
+        case .keep:
+            return
+        case .standDown:
+            NSApp.deactivate()
+        case .give:
+            // Granted because pace is the active app asking: the frontmost app may
+            // always pass activation on. If macOS refuses anyway, stand down rather
+            // than sit on focus nobody can see.
+            if target?.activate() != true { NSApp.deactivate() }
         }
     }
 
@@ -190,6 +255,8 @@ final class OverlayController {
         win.setFrame(screen.frame, display: true)
         window = win
 
+        // Read before the steal, or the answer is always "pace".
+        interrupted = NSWorkspace.shared.frontmostApplication
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
 
