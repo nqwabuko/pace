@@ -198,8 +198,8 @@ if let ci = args.firstIndex(of: "--check") {
 if args.contains("--demo") {
     // A scratch settings domain, so previewing the overlay can't leave your real
     // break length set to five seconds.
-    UserDefaults.standard.removePersistentDomain(forName: "io.github.nqwabuko.pace.demo")
-    Settings.store = UserDefaults(suiteName: "io.github.nqwabuko.pace.demo") ?? .standard
+    UserDefaults.standard.removePersistentDomain(forName: "codes.charlie.pace.demo")
+    Settings.store = UserDefaults(suiteName: "codes.charlie.pace.demo") ?? .standard
     Settings.registerDefaults()
     Settings.set(.eyeDurationSec, 5)
     let app = NSApplication.shared
