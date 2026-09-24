@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 
 APP="pace.app"
 BIN="pace"
-ID="global.ampeco.pace"
+ID="io.github.nqwabuko.pace"
 VERSION="1.1.0"
 
 echo "▸ Building release binary…"

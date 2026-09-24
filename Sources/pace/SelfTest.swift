@@ -795,7 +795,7 @@ enum SelfTest {
     /// Run `body` against a throwaway settings domain, so a check can set an
     /// interval without touching the real one.
     private static func withScratchSettings(_ body: () -> Void) {
-        let suite = "global.ampeco.pace.selftest"
+        let suite = "io.github.nqwabuko.pace.selftest"
         UserDefaults.standard.removePersistentDomain(forName: suite)
         let saved = Settings.store
         Settings.store = UserDefaults(suiteName: suite) ?? .standard
@@ -811,7 +811,7 @@ enum SelfTest {
     /// times, then taken. Built inline rather than through `--sim`'s parser so this
     /// check can't be broken by the parser.
     private static func extendFourTimes() -> (strains: [Double], refusals: Int, trail: [Loop.Mark], afterTaking: Double) {
-        let suite = "global.ampeco.pace.selftest"
+        let suite = "io.github.nqwabuko.pace.selftest"
         UserDefaults.standard.removePersistentDomain(forName: suite)
         let store = UserDefaults(suiteName: suite) ?? .standard
         let saved = Settings.store

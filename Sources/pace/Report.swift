@@ -76,7 +76,7 @@ enum Report {
     /// on an unmounted network volume, and a blocking write on the main thread
     /// would stall the run loop — which *is* the break timer and the overlay
     /// countdown. One serial queue keeps the ordering guarantees a log needs.
-    private static let io = DispatchQueue(label: "global.ampeco.pace.report", qos: .utility)
+    private static let io = DispatchQueue(label: "io.github.nqwabuko.pace.report", qos: .utility)
 
     /// What the last vault write did, published back on the main thread so the
     /// menu can say so. `nil` means fine. Failures are not fatal and not sticky:

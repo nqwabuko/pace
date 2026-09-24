@@ -49,7 +49,7 @@ enum Sim {
     static func run(_ script: String) -> Int32 {
         // A throwaway settings domain: the sim must not be able to change the
         // real app's configuration as a side effect of being run.
-        let suite = "global.ampeco.pace.sim"
+        let suite = "io.github.nqwabuko.pace.sim"
         UserDefaults.standard.removePersistentDomain(forName: suite)
         guard let store = UserDefaults(suiteName: suite) else {
             print("sim: could not open a scratch settings domain")
