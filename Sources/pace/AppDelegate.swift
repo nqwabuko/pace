@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var feedbackWindow: NSWindow?
     private var activityWindow: NSWindow?
     private var nudgeUntil: Date?
+    private var pendingBeats: [String] = []   // a coached nudge's banners still to come
     private var lastAppearance: IconMaker.Appearance?
     private var lastGlyph: IconMaker.GlyphState?   // last-drawn glyph state, so the 1s tick redraws only on a visible change
     private var lastStatus: Scheduler.Status?   // latest tick, so a closing break can log what it owed
@@ -87,6 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         scheduler.onBreakDue = { [weak self] kind, trail in
             guard let self else { return }
             self.scheduler.overlayShowing = true
+            // The call ended and the real break is up: a "time's up" banner landing
+            // on top of it would be about a break you are no longer taking.
+            Notify.cancel(self.pendingBeats)
+            self.pendingBeats = []
+            self.nudgeUntil = nil
             // The debt reading is the previous tick's: the break fires before this
             // tick's status goes out, so a second is the worst it can be behind.
             self.overlay.show(kind, trail: trail, overdueSec: self.lastStatus?.gauge(kind).overdue ?? 0)
@@ -378,27 +384,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     // MARK: on-call nudges
 
-    /// A due break arrived while on a call (on-call nudges on): flip the menu-bar
-    /// eye to "look away" for ~30s and post a quiet, call-friendly notification.
-    /// No sound (your mic would catch it); the icon is the private cue.
+    /// A due break arrived while on a call (on-call nudges on): the menu-bar figure
+    /// sits up and glances away for as long as the break lasts, and a short script
+    /// of quiet banners times it for you (`Coach`). No sound (your mic would catch
+    /// it); the icon is the private cue.
     private func deliverCallNudge(_ kind: BreakKind) {
-        nudgeUntil = Date().addingTimeInterval(30)
+        let (cue, swap) = Tips.callCues(for: kind)
+        let beats = Coach.script(kind, seconds: kind.durationSec, cue: cue, swap: swap)
+        nudgeUntil = Date().addingTimeInterval(max(30, Coach.span(beats)))
         let owed = lastStatus?.gauge(kind)
         let now = Date()
+        // A new nudge replaces whatever is left of the last one's script.
+        Notify.cancel(pendingBeats)
+        pendingBeats = []
         // The row is written from the delivery callback, not before it. A nudge
         // during a call is the one break pace can't show you, so the only fact
         // worth recording about it is whether it left the app — and a row saying
         // "nudged" that was written whatever macOS did made "I never saw it" and
         // "it was never sent" the same record. `Notify.post` calls back exactly
         // once on every path, including the refusals, so there is still one row
-        // per nudge.
-        Notify.post(title: kind == .eye ? "Rest your eyes" : "Shift your body",
-                    body: Tips.callCue(for: kind),
-                    id: "pace-nudge-\(kind.label)") { delivery in
+        // per nudge. The later beats are the same nudge, so they get no row, and
+        // are only queued once the first has actually gone.
+        let first = beats[0]
+        Notify.post(title: first.title, body: first.body, id: "pace-nudge-\(kind.label)") { [weak self] delivery in
             Report.log(kind: kind.label, outcome: "nudged", seconds: 0,
                        overdueSec: owed?.overdue, refusals: owed?.refusals,
                        callSec: owed?.callHeldSec, delivery: delivery, now: now)
             if !Settings.vaultPath.isEmpty { Report.updateVault(Settings.vaultPath, now: now) }
+            guard let self, delivery.sent else { return }
+            for (i, b) in beats.enumerated().dropFirst() {
+                let id = "pace-nudge-\(kind.label)-\(i)"
+                Notify.schedule(after: b.at, title: b.title, body: b.body, id: id)
+                self.pendingBeats.append(id)
+            }
         }
     }
 

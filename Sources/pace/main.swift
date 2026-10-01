@@ -101,16 +101,27 @@ if let i = args.firstIndex(of: "--stats-preview"), i + 1 < args.count {
     exit(ok ? 0 : 1)
 }
 
-// `--nudge-test`: post one real on-call nudge and print what became of it.
-// `--check` says what macOS *allows*; this proves the whole path, which is the
-// only way to tell a banner you missed from one that was never drawn. It writes
-// nothing to the log, because nothing about it is a break you owed.
+// `--nudge-test [move]`: post one real on-call nudge, coached, and print what
+// became of it. `--check` says what macOS *allows*; this proves the whole path,
+// which is the only way to tell a banner you missed from one that was never drawn.
+// The later beats are left with macOS, so they still arrive after this exits. It
+// writes nothing to the log, because nothing about it is a break you owed.
 if args.contains("--nudge-test") {
     Settings.registerDefaults()
+    let kind: BreakKind = args.contains("move") ? .move : .eye
+    let (cue, swap) = Tips.callCues(for: kind)
+    let beats = Coach.script(kind, seconds: kind.durationSec, cue: cue, swap: swap)
+    for b in beats { print(String(format: "  +%3.0fs  %@: %@", b.at, b.title, b.body)) }
     var result: Delivery?
-    Notify.post(title: "Rest your eyes", body: Tips.callCue(for: .eye), id: "pace-nudge-test") { result = $0 }
+    Notify.post(title: beats[0].title, body: beats[0].body, id: "pace-nudge-test") { result = $0 }
     let deadline = Date().addingTimeInterval(5)
     while result == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    if result?.sent == true {
+        for (i, b) in beats.enumerated().dropFirst() {
+            Notify.schedule(after: b.at, title: b.title, body: b.body, id: "pace-nudge-test-\(i)")
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))   // let the adds land
+    }
     print(result?.human ?? "no answer in 5s — the notification centre never called back")
     exit(result?.sent == true ? 0 : 1)
 }

@@ -93,6 +93,10 @@ gauge**, and the two never borrow each other's channel.
   not refused. The glance-away nudge sits the figure up straight.
 - **Paused** is the figure with a slash through it, and it reads as rested.
 
+The app icon is the same figure, drawn from the same `marks(_:)`, sat up in the
+glance-away pose with the break card's googly eye for a head, on a teal squircle
+cut to Apple's 824px grid so macOS 26's glass edge sits on it cleanly.
+
 One rule holds it together: **you cannot have a gauge you cannot see.** Every step
 the app is capable of drawing has to change enough pixels, at the size the menu bar
 actually renders, for a person to notice. That is measured, not asserted — see
@@ -219,8 +223,35 @@ notifs     : on — nudges appear as banners
 no API will tell you about — post one for real and watch your own screen:
 
 ```sh
-/Applications/pace.app/Contents/MacOS/pace --nudge-test    # exits non-zero if nothing was sent
+/Applications/pace.app/Contents/MacOS/pace --nudge-test         # exits non-zero if nothing was sent
+/Applications/pace.app/Contents/MacOS/pace --nudge-test move    # the movement script
 ```
+
+## A nudge on a call times the break
+
+On a call you can't watch the clock, because the clock is on the screen you're
+meant to be looking away from. So an on-call nudge is a short script of quiet
+banners rather than one. For a 30-second eye break:
+
+```
+  +  0s  Glance away, 30 seconds: Look away from the screen at something far off.
+  + 30s  That's 30 seconds: If you glanced away, well done. Back to it.
+```
+
+A break of a minute or more also gets a halfway beat with a second thing to do
+(a 2-minute move break: sit up, then at 60s circle your ankles, then done at 120s).
+The lengths come from the break-length settings, so changing "Eye break length"
+changes the script. The menu-bar figure holds its glance-away pose for the same
+span.
+
+`Coach.script(kind, seconds:, cue:, swap:)` is the whole design, as a pure value:
+no clock, no notification centre, no randomness (the shell picks the cues and
+hands them in), so `--selftest` checks the timing without waiting it out. The
+first banner is posted and logged exactly as before; the later ones are handed to
+macOS with a time-interval trigger, so a starved run loop can't make "time's up"
+late. They're withdrawn if the real break card comes up (the call ended) or a new
+nudge replaces them. The closing beat says *if you did*: a banner can't know
+whether you looked away, so nothing here credits a rest.
 
 ## The chain on the card
 

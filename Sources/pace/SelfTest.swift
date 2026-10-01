@@ -403,6 +403,31 @@ enum SelfTest {
               "away=\(slept.awaySec)s remaining=\(slept.remaining)s of 1080s",
               slept.awaySec >= 60 * 60 && abs(slept.remaining - 18 * 60) <= 2)
 
+        print("\ncoach — a nudge on a call times the break, because you can't watch the clock")
+        let eye30 = Coach.script(.eye, seconds: 30, cue: "look far", swap: "blink")
+        let move120 = Coach.script(.move, seconds: 120, cue: "sit up", swap: "ankles")
+        check("an eye nudge says go, then says when 30 seconds are up",
+              eye30.map { String(format: "%.0f", $0.at) }.joined(separator: ","),
+              eye30.map(\.at) == [0, 30] && eye30[1].title == "That's 30 seconds")
+        check("and the last word is 'if you did', never a claim that you did", eye30[1].body,
+              eye30[1].body.hasPrefix("If you"))
+        check("a long move break gets a halfway beat with a second thing to do",
+              move120.map { String(format: "%.0f", $0.at) }.joined(separator: ","),
+              move120.map(\.at) == [0, 60, 120] && move120[1].body == "ankles")
+        check("the first beat names the length the setting gives, in words", move120[0].title,
+              move120[0].title == "Shift your body, 2 minutes")
+        let lengths = [5, 20, 30, 45, 59, 60, 61, 90, 120]
+        let ordered = lengths.allSatisfy { s in
+            let b = Coach.script(.move, seconds: s, cue: "a", swap: nil)
+            return b.first?.at == 0 && Coach.span(b) == TimeInterval(s)
+                && zip(b, b.dropFirst()).allSatisfy { $0.at < $1.at }
+                && b.allSatisfy { !$0.title.isEmpty && !$0.body.isEmpty }
+        }
+        check("every length starts at once, ends on time, and never runs backwards",
+              "\(lengths.count) lengths", ordered)
+        check("a short break gets no middle banner on top of the first",
+              "", Coach.script(.eye, seconds: 59, cue: "a", swap: nil).count == 2)
+
         print("\nkeyboard — every button on the card must have a key, and no key may act alone")
         func key(_ chars: String?, _ flags: NSEvent.ModifierFlags = .command, code: UInt16 = 0) -> BreakKey? {
             BreakKey.action(keyCode: code, chars: chars, flags: flags)

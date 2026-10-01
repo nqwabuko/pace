@@ -85,9 +85,10 @@ enum Tips {
     }
 
     // Short, call-friendly cues for the on-call nudge (one line, doable on camera).
+    // No durations in them: the banner's title says how long, from the setting.
     static let callEye = [
-        "Glance away from the screen for 20 seconds; look at something far.",
-        "If you can, drop off camera for 20-30s and rest your eyes, then come back.",
+        "Look away from the screen at something far off.",
+        "If you can, drop off camera and rest your eyes, then come back.",
         "Soften your focus and blink slowly a few times while you listen.",
         "Look out a window or across the room for a moment.",
     ]
@@ -99,7 +100,9 @@ enum Tips {
         "Unclench your jaw and drop your shoulders.",
     ]
 
-    static func callCue(for kind: BreakKind) -> String {
-        (kind == .eye ? callEye : callMove).randomElement() ?? ""
+    /// Two different cues: one to start on, one to switch to at halfway.
+    static func callCues(for kind: BreakKind) -> (String, String?) {
+        let pool = (kind == .eye ? callEye : callMove).shuffled()
+        return (pool.first ?? "", pool.dropFirst().first)
     }
 }

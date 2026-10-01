@@ -86,6 +86,14 @@ absence — a screen that never locks is not a human who never left
   ok   ...so the break you were owed is waiting the moment you're back   fired after 0s
   ok   a sleep the run loop never saw counts as a rest too   away=3600s remaining=1080s of 1080s
 
+coach — a nudge on a call times the break, because you can't watch the clock
+  ok   an eye nudge says go, then says when 30 seconds are up   0,30
+  ok   and the last word is 'if you did', never a claim that you did   If you glanced away, well done. Back to it.
+  ok   a long move break gets a halfway beat with a second thing to do   0,60,120
+  ok   the first beat names the length the setting gives, in words   Shift your body, 2 minutes
+  ok   every length starts at once, ends on time, and never runs backwards   9 lengths
+  ok   a short break gets no middle banner on top of the first
+
 keyboard — every button on the card must have a key, and no key may act alone
   ok   ⌘S skips
   ok   ⌘5 buys five more minutes

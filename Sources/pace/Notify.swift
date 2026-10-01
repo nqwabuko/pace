@@ -119,6 +119,24 @@ enum Notify {
         }
     }
 
+    /// Hand macOS a banner to show `seconds` from now: a coached nudge's later
+    /// beats. The system keeps the time, so a starved run loop can't make the "time's
+    /// up" banner late. Unlogged, because the nudge it belongs to already is.
+    static func schedule(after seconds: TimeInterval, title: String, body: String, id: String) {
+        guard available, seconds > 0 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+    }
+
+    /// Withdraw beats that haven't shown yet.
+    static func cancel(_ ids: [String]) {
+        guard available, !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
     /// Can a nudge reach the desktop at all, right now? What `--check` prints and
     /// what the activity window says at the top, so the answer never has to be
     /// inferred from a run of rows.
