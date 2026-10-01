@@ -719,6 +719,16 @@ enum IconMaker {
     }
 
     /// Render the 1024px app icon PNG to `path`. Called as `pace --make-icon`.
+    ///
+    /// The figure is the menu-bar glyph itself, taken from the same `marks(_:)` and
+    /// sat up straight (the on-call nudge's posture), so the Dock and the bar are
+    /// one character rather than an SF Symbol in one place and pace's own drawing in
+    /// the other. Its head is the googly eye from the break card, glancing up and
+    /// away: the one thing pace asks of you, drawn as the app's face.
+    ///
+    /// The tile follows Apple's macOS grid (an 824px body centred on 1024) with a
+    /// continuous-corner squircle, because macOS 26 lays its own glass edge over a
+    /// legacy icon and a shape off that grid shows the seam.
     static func writeAppIcon(to path: String, size: CGFloat = 1024) -> Bool {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size),
@@ -727,42 +737,83 @@ enum IconMaker {
             let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return false }
 
         NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
         NSGraphicsContext.current = ctx
         let rect = NSRect(x: 0, y: 0, width: size, height: size)
         ctx.cgContext.clear(rect)
 
-        // Calm teal/green squircle — the resting palette, distinct from netty/ember.
-        let bgRect = rect.insetBy(dx: size * 0.085, dy: size * 0.085)
-        let bg = NSBezierPath(roundedRect: bgRect, xRadius: size * 0.205, yRadius: size * 0.205)
+        // Calm teal squircle: the resting palette, distinct from netty/ember.
+        let tile = squircle(rect.insetBy(dx: size * 100 / 1024, dy: size * 100 / 1024))
         NSGradient(colors: [
             NSColor(srgbRed: 0.30, green: 0.72, blue: 0.66, alpha: 1),   // teal top
             NSColor(srgbRed: 0.16, green: 0.52, blue: 0.55, alpha: 1),   // deep teal bottom
-        ])!.draw(in: bg, angle: -90)
+        ])!.draw(in: tile, angle: -90)
 
-        // A white walking figure — movement + rest, the whole point of the app.
-        if let symbol = NSImage(systemSymbolName: "figure.walk", accessibilityDescription: nil) {
-            let config = NSImage.SymbolConfiguration(pointSize: size * 0.5, weight: .semibold)
-            let glyph = symbol.withSymbolConfiguration(config) ?? symbol
-            let side = size * 0.5
-            let target = NSRect(x: (size - side) / 2, y: (size - side) / 2, width: side, height: side)
+        // The glyph's own geometry, in its 18pt space, scaled onto the tile.
+        let p = posture(move: nil, onCall: false, nudge: true)
+        let h = head(p, eye: strain(0, paused: false), missed: 0, onCall: false)
+        // A bigger head than the bar's: at 18pt it has to stay a dot, at Dock size
+        // it can be an eye. It rides the same neck tangent so it still sits on the
+        // spine instead of floating.
+        let r = h.r * 1.35
+        let dx = h.cx - p.neck.x, dy = h.cy - p.neck.y
+        let len = max(0.001, sqrt(dx * dx + dy * dy))
+        let eye = CGPoint(x: p.neck.x + (r + 0.30) * dx / len, y: p.neck.y + (r + 0.30) * dy / len)
 
-            let tinted = NSImage(size: target.size)
-            tinted.lockFocus()
-            glyph.draw(in: NSRect(origin: .zero, size: target.size))
-            NSColor.white.set()
-            NSRect(origin: .zero, size: target.size).fill(using: .sourceAtop)
-            tinted.unlockFocus()
+        // Centred on what is actually drawn, the bigger head included.
+        let scale = size * 0.032
+        let box = bounds(bodyMark(p)).union(CGRect(x: eye.x - r, y: eye.y - r, width: 2 * r, height: 2 * r))
+        let tx = size / 2 - box.midX * scale, ty = size / 2 - box.midY * scale
 
-            let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
-            shadow.shadowBlurRadius = size * 0.03
-            shadow.shadowOffset = NSSize(width: 0, height: -size * 0.012)
-            shadow.set()
-            tinted.draw(in: target)
-        }
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+        shadow.shadowBlurRadius = size * 0.03
+        shadow.shadowOffset = NSSize(width: 0, height: -size * 0.012)
 
+        let xf = NSAffineTransform()
+        xf.translateX(by: tx, yBy: ty)
+        xf.scale(by: scale)
+
+        // One layer, one shadow: shadowed separately, the head would cast a seam
+        // across its own neck.
+        NSGraphicsContext.saveGraphicsState()
+        shadow.set()
+        ctx.cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+        xf.concat()
+        render([bodyMark(p)], color: .white)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: NSRect(x: eye.x - r, y: eye.y - r, width: 2 * r, height: 2 * r)).fill()
+        ctx.cgContext.endTransparencyLayer()
         NSGraphicsContext.restoreGraphicsState()
+
+        // The pupil, glancing up and to the far side: looking at something far away.
+        NSGraphicsContext.saveGraphicsState()
+        xf.concat()
+        let pr = r * 0.52, reach = r - pr - r * 0.10
+        let a: CGFloat = 40 * .pi / 180
+        let pc = CGPoint(x: eye.x + reach * cos(a), y: eye.y + reach * sin(a))
+        NSColor(srgbRed: 0.07, green: 0.20, blue: 0.22, alpha: 1).setFill()
+        NSBezierPath(ovalIn: NSRect(x: pc.x - pr, y: pc.y - pr, width: 2 * pr, height: 2 * pr)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
         guard let data = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// A continuous-corner tile: a superellipse, which is what Apple's icon shape
+    /// approximates. A circular-arc rounded rect has a visible kink where the arc
+    /// meets the edge, and that is the seam macOS 26's glass edge picks out.
+    private static func squircle(_ r: NSRect, n: CGFloat = 5) -> NSBezierPath {
+        let path = NSBezierPath()
+        let a = r.width / 2, b = r.height / 2
+        for i in 0...360 {
+            let t = CGFloat(i) * .pi / 180
+            let c = cos(t), s = sin(t)
+            let x = r.midX + a * (c < 0 ? -1 : 1) * pow(abs(c), 2 / n)
+            let y = r.midY + b * (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
+            i == 0 ? path.move(to: NSPoint(x: x, y: y)) : path.line(to: NSPoint(x: x, y: y))
+        }
+        path.close()
+        return path
     }
 }
