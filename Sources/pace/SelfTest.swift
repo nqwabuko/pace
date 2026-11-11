@@ -504,6 +504,21 @@ enum SelfTest {
         h = h.folding(nil, at: t)
         check("a success clears it", "", !h.isFailing && h.lastError == nil && h.lastSuccess == t)
 
+        print("\ndials — what `dials get pace --json` says is what pace applies")
+        // The exact shape dials prints (serde, keys sorted), holding Charlie's values at
+        // import: callBreaks on although its default is off. Decoded and read here
+        // without calling dials, so this never touches the live settings.
+        let fixture = #"{"rev":3,"values":{"awayResetMin":15,"callBreaks":true,"endChime":true,"eyeDurationSec":30,"eyeEnabled":true,"eyeIntervalMin":25,"idleAware":true,"meetingAware":true,"moveDurationSec":120,"moveEnabled":true,"moveIntervalMin":30,"soundEnabled":false,"vaultPath":""}}"#
+        let snap = try? JSONDecoder().decode(DialsSnapshot.self, from: Data(fixture.utf8))
+        check("the snapshot decodes", "rev \(snap.map { String($0.rev) } ?? "none")", snap?.rev == 3)
+        let saved = Settings.snapshot
+        Settings.snapshot = snap
+        check("callBreaks reads on from dials", "", Settings.callBreaks)
+        check("eyeIntervalMin reads 25 from dials", "\(Settings.int(.eyeIntervalMin))",
+              Settings.int(.eyeIntervalMin) == 25 && Settings.eyeIntervalSec == 1500)
+        check("the report's using is the snapshot's values", "", Settings.using == snap?.values)
+        Settings.snapshot = saved
+
         print(failures == 0 ? "\nall checks passed\n" : "\n\(failures) check(s) failed\n")
         return failures == 0 ? 0 : 1
     }

@@ -38,6 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var moveLen: NSMenuItem!
     private var awayReset: NSMenuItem!
 
+    // dials: the folder watch (kept, or it stops), the 60 s report and the rev last
+    // reported, so pace reports a new snapshot once and not on its own report's write.
+    private let launchedAt = Date()
+    private var dialsWatch: AnyObject?
+    private var dialsTimer: Timer?
+    private var reportedRev: Int?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -111,7 +118,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         dnc.addObserver(self, selector: #selector(screenDidLock), name: .init("com.apple.screenIsLocked"), object: nil)
         dnc.addObserver(self, selector: #selector(screenDidUnlock), name: .init("com.apple.screenIsUnlocked"), object: nil)
 
+        if Settings.snapshot != nil {
+            dialsWatch = DialsClient.watch("pace") { [weak self] in self?.dialsChanged() }
+            dialsTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.reportToDials() }
+            reportToDials()
+        }
+
         scheduler.start()
+    }
+
+    // MARK: dials
+
+    /// Something under pace's dials folder changed (a setting, or a report's own
+    /// write): re-read, and report only when the rev moved. The scheduler reads
+    /// Settings each tick, so the new values apply at the next one.
+    private func dialsChanged() {
+        Settings.refresh()
+        guard Settings.snapshot?.rev != reportedRev else { return }
+        refreshChecks()
+        reportToDials()
+    }
+
+    private func reportToDials() {
+        guard let snap = Settings.snapshot else { return }
+        DialsClient.report("pace", "app", ok: Settings.problem == nil, summary: Settings.problem ?? "running",
+                           rev: snap.rev, using: Settings.using, runningSince: launchedAt)
+        reportedRev = snap.rev
     }
 
     // MARK: menu

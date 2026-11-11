@@ -222,6 +222,7 @@ if args.contains("--demo") {
 
 Settings.registerDefaults()
 Settings.migrateBreakLengths()   // one-time bump of an existing install to the new lengths
+if DialsClient.installed { Settings.useDials() }   // dials is the store from here on
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
