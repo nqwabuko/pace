@@ -504,7 +504,7 @@ enum SelfTest {
         h = h.folding(nil, at: t)
         check("a success clears it", "", !h.isFailing && h.lastError == nil && h.lastSuccess == t)
 
-        print("\ndials — what `dials get pace --json` says is what pace applies")
+        print("\ndials: what `dials get pace --json` says is what pace applies")
         // The exact shape dials prints (serde, keys sorted), holding Charlie's values at
         // import: callBreaks on although its default is off. Decoded and read here
         // without calling dials, so this never touches the live settings.
