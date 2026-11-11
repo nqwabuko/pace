@@ -29,7 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let idleItem = NSMenuItem(title: "Reset after a long break away", action: #selector(toggleIdle), keyEquivalent: "")
     private let soundItem = NSMenuItem(title: "Sound when a break starts", action: #selector(toggleSound), keyEquivalent: "")
     private let endChimeItem = NSMenuItem(title: "Chime when a break ends", action: #selector(toggleEndChime), keyEquivalent: "")
-    private let loginItem = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")
     private let resumeItem = NSMenuItem(title: "Resume", action: #selector(resume), keyEquivalent: "")
     private let vaultItem = NSMenuItem(title: "", action: #selector(rebuildReport), keyEquivalent: "")
     private var eyeEvery: NSMenuItem!
@@ -46,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var reportedRev: Int?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LoginItem.ensureRegistered()   // on: macOS starts pace at login; off quits it there (main.swift)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = IconMaker.statusImage(.rested)
@@ -133,6 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// write): re-read, and report only when the rev moved. The scheduler reads
     /// Settings each tick, so the new values apply at the next one.
     private func dialsChanged() {
+        if DialsClient.isOff("pace") {   // switched off in dials: say so, then quit
+            DialsClient.report("pace", "app", ok: true, summary: "off, quitting", rev: nil, using: [:], runningSince: nil)
+            NSApp.terminate(nil)
+            return
+        }
         Settings.refresh()
         guard Settings.snapshot?.rev != reportedRev else { return }
         refreshChecks()
@@ -213,9 +218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         m.addItem(resumeItem)
         m.addItem(.separator())
 
-        loginItem.target = self
-        m.addItem(loginItem)
-        m.addItem(.separator())
         add(m, "Log a bug or idea…", #selector(showFeedback))
         add(m, "About pace", #selector(about))
         add(m, "Quit pace", #selector(quit))
@@ -257,7 +259,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         idleItem.state = Settings.idleAware ? .on : .off
         soundItem.state = Settings.bool(.soundEnabled) ? .on : .off
         endChimeItem.state = Settings.endChime ? .on : .off
-        loginItem.state = LoginItem.isEnabled ? .on : .off
         resumeItem.isEnabled = scheduler.isPaused
         vaultItem.title = vaultStatusLine()
         tick(eyeEvery, Settings.int(.eyeIntervalMin))
@@ -460,7 +461,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner])
     }
-    @objc private func toggleLogin() { LoginItem.toggle() }
     @objc private func setEyeEvery(_ s: NSMenuItem) { Settings.set(.eyeIntervalMin, s.tag) }
     @objc private func setEyeLen(_ s: NSMenuItem) { Settings.set(.eyeDurationSec, s.tag) }
     @objc private func setMoveEvery(_ s: NSMenuItem) { Settings.set(.moveIntervalMin, s.tag) }

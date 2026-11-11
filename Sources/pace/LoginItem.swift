@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-/// "Start at Login", via the modern SMAppService API (macOS 13+). Only works
+/// pace's login item, via the modern SMAppService API (macOS 13+). Only works
 /// from the built .app bundle; from a raw `swift run` it will report/return
 /// false, which is fine for development.
 enum LoginItem {
@@ -18,15 +18,12 @@ enum LoginItem {
     /// nothing: it sent a debugging session after a setting that was never unset.
     static var enabled: Bool? { isAvailable ? isEnabled : nil }
 
-    /// Flip the state. Returns the resulting enabled-ness (unchanged on error).
-    @discardableResult
-    static func toggle() -> Bool {
-        do {
-            if isEnabled { try SMAppService.mainApp.unregister() }
-            else { try SMAppService.mainApp.register() }
-        } catch {
-            NSLog("pace: login-item toggle failed: \(error.localizedDescription)")
-        }
-        return isEnabled
+    /// Register pace's login item if it isn't already. Called at each launch while
+    /// on; switching off in dials never unregisters it, so macOS still launches pace
+    /// at login and pace quits itself there. A failure is logged, not fatal.
+    static func ensureRegistered() {
+        guard isAvailable, !isEnabled else { return }
+        do { try SMAppService.mainApp.register() }
+        catch { NSLog("pace: login-item register failed: \(error.localizedDescription)") }
     }
 }

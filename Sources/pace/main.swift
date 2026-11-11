@@ -220,6 +220,13 @@ if args.contains("--demo") {
     app.run()
 }
 
+// Switched off in dials: quit before any UI. This is the login path too: the login
+// item stays registered, so macOS launches pace at every login and it ends here.
+if DialsClient.isOff("pace") {
+    DialsClient.report("pace", "app", ok: true, summary: "off, quitting", rev: nil, using: [:], runningSince: nil)
+    exit(0)
+}
+
 Settings.registerDefaults()
 Settings.migrateBreakLengths()   // one-time bump of an existing install to the new lengths
 if DialsClient.installed { Settings.useDials() }   // dials is the store from here on
