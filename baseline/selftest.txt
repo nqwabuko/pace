@@ -127,6 +127,12 @@ vault health — a broken vault must read as broken, then heal
   ok   three failures count as three   3
   ok   a success clears it
 
+dials: what `dials get pace --json` says is what pace applies
+  ok   the snapshot decodes   rev 3
+  ok   callBreaks reads on from dials
+  ok   eyeIntervalMin reads 25 from dials   25
+  ok   the report's using is the snapshot's values
+
 all checks passed
 
 exit: 0
